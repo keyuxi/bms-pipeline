@@ -1,0 +1,16 @@
+sample_id,short_id,batch,experiment,Group,Condition,Gating,Time,Recall,CaptureDate,AgeWeeks,Gender
+YK01_En7Apos,En7Apos,B2,En7A,En7,En7pos,GFPpos,d07,N,4/27/23,13,M
+YK02_En7Bneg,En7Bneg,B4,En7B,En7,En7neg,GFPneg,d07,N,7/6/23,13,F
+YK04_En7Cneg,En7Cneg,B10,En7C,En7,En7neg,GFPneg,d07,N,3/7/24,20,M+F
+YK05_En7Cpos,En7Cpos,B10,En7C,En7,En7pos,GFPpos,d07,N,3/7/24,20,M+F
+YK06_En7ReAneg,En7ReAneg,B12,En7ReA,En7Re,En7Reneg,GFPneg,d07,R,3/21/24,15,M+F
+YK07_En7ReApos,En7ReApos,B12,En7ReA,En7Re,En7Repos,GFPpos,d07,R,3/21/24,15,M+F
+YK08_En7ReBpos,En7ReBpos,B14,En7ReB,En7Re,En7Repos,GFPpos,d07,R,5/16/24,13,M+F
+YK09_En28Apos,En28Apos,B3,En28A,En28,En28pos,GFPpos,d28,N,7/20/23,16,F
+YK10_En28Cneg,En28Cneg,B7,En28C,En28,En28neg,GFPneg,d28,N,1/18/24,19,M+F
+YK12_En28Dneg,En28Dneg,B11,En28D,En28,En28neg,GFPneg,d28,N,4/11/24,18,M+F
+YK13_En28Dpos,En28Dpos,B11,En28D,En28,En28pos,GFPpos,d28,N,4/11/24,18,M+F
+YK14_En28ReBneg,En28ReBneg,B13,En28ReB,En28Re,En28Reneg,GFPneg,d28,R,5/30/24,15,M+F
+YK15_En28ReBpos,En28ReBpos,B13,En28ReB,En28Re,En28Repos,GFPpos,d28,R,5/30/24,15,M+F
+YK16_En28ReCneg,En28ReCneg,B15,En28ReC,En28Re,En28Reneg,GFPneg,d28,R,6/6/24,12,M+F
+YK17_En28ReCpos,En28ReCpos,B15,En28ReC,En28Re,En28Repos,GFPpos,d28,R,6/6/24,12,M+F

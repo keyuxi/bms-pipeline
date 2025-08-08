@@ -1,0 +1,1308 @@
+---
+title: "BMS"
+author: "Yuxi Ke"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    theme: "flatly"
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r config, warning = FALSE}
+project_id  <- "bms"
+doc_id      <- "04-2b_DAR"
+dataout     <- here::here("Output",  doc_id); dir.create(dataout,  recursive = TRUE)
+figout      <- here::here("Fig",     doc_id); dir.create(figout,   recursive = TRUE)
+get_outdir <- function(x) file.path(dataout, x)
+```
+
+```{r setup, include = FALSE}
+
+# NO NEED TO MODIFY THIS CHUNK
+here::i_am(".gitignore")
+# knitr::opts_chunk$set(message = TRUE,
+#                       warning = FALSE,
+#                       error = FALSE,
+#                       cache = FALSE,
+#                       fig.path = figout,
+#                       fig.keep = "all",
+#                       dev = c("png", "pdf"),
+#                       cache.lazy = FALSE)
+
+grDevices::pdf.options(useDingbats = FALSE)
+options(knitr.table.format = "html")
+
+reload <- function() {
+    devtools::load_all("~/workspace/bms")
+}
+
+redoc <- function() {
+    devtools::document("~/workspace/bms")
+}
+
+library(here)
+library(Seurat)
+library(dplyr)
+library(tidyr)
+library(ComplexHeatmap)
+library(ggplot2)
+library(patchwork)
+library(ggpubr)
+library(DESeq2)
+library(viridis)
+library(Matrix)
+library(MultiAssayExperiment)
+library(DelayedArray)
+library(cluster)
+library(scran)
+library(reshape2)
+library(gridExtra)
+
+reload()
+bms::setup_archr(); bms::set_theme()
+set.seed(100)
+```
+
+***
+
+# Overview
+
+Exploratory only.
+
+Input:
+
+    - An ArchR project
+    - A Seurat object
+    - A sample metadata csv file
+    
+Output:
+
+
+    
+Yuxi Ke, 05/08/2025
+
+
+# Load data
+
+## Define file names
+
+```{r, include=TRUE}
+location <- "local" # {"local", "sherlock"}
+
+if (location == "local") {
+    archr.proj.path <- here::here("Data/ArchRProjects/BMS_diff_new")
+    gex.obj.path <- here::here("Data/SeuratObjects/gex_gr.rds")
+} else {
+    oak.path <- "/oak/stanford/groups/wjg/kyx/data/bms"
+    archr.proj.path <- file.path(oak.path, "archr/BMS_mm10")
+    gex.obj.path <- file.path(oak.path, "seurat/BMS_clean.rds")
+}
+```
+
+## Read data
+
+```{r}
+proj <- loadArchRProject(archr.proj.path, showLogo = FALSE)
+gex <- readRDS(gex.obj.path)
+sample_metadata <- load_sample_metadata(here::here("Data/Metadata/YK_sample_sheet.csv"))
+```
+
+# Check ArchR pseudobulking
+
+## Per cell type
+
+```{r Data stats for parameter setting}
+cell_counts <- proj@cellColData %>%
+  as.data.frame() %>%
+  dplyr::group_by(cell_type, Condition, Sample) %>%
+  dplyr::summarise(nCells = n(), .groups="drop")
+
+# How many “subgroups” would pass default minCells?
+sum(cell_counts$nCells >= 40)
+# What’s the smallest?
+min(cell_counts$nCells)
+# What’s the 10th percentile?
+quantile(cell_counts$nCells, c(0.1, .9))
+
+```
+
+```{r Mock archr groups}
+archr_groups <- addGroupCoverages(ArchRProj = proj,
+                          groupBy = "cell_type",
+                          minCells = 20,
+                          maxCells = 300,
+                          sampleRatio = 1,
+                          minReplicates = 13,
+                          maxReplicates = 16,
+                          returnGroups = TRUE,
+                          force = TRUE)
+```
+
+```{r ArchR pseudobulk for peak calling}
+## Flatten and inspect nested archr_groups
+
+# 1) Build a data.frame of cellType × pseudoBulk × nCells
+df_archr <- do.call(rbind, lapply(names(archr_groups), function(ct) {
+  grpList <- archr_groups[[ct]]
+  data.frame(
+    cellType   = ct,
+    pseudoBulk = names(grpList),
+    nCells     = lengths(grpList),
+    stringsAsFactors = FALSE
+  )
+}))
+
+# 2) View the first few rows
+head(df_archr)
+
+# 3) Summary statistics per cellType
+
+df_archr %>%
+  dplyr::group_by(cellType) %>%
+  dplyr::summarise(
+    nReplicates = n(),
+    minCells     = min(nCells),
+    medianCells  = median(nCells),
+    maxCells     = max(nCells)
+  )
+
+# 4) Full table sorted by nCells
+df_archr[order(df_archr$nCells), ]
+
+# 5) Inspect barcodes for a specific pseudobulk
+#    e.g. CGE → YK05_En7Cpos
+cellType <- "CGE"
+pseudo   <- "YK05_En7Cpos"
+head(archr_groups[[cellType]][[pseudo]], 10)
+
+
+ggplot(df_archr, aes(x = pseudoBulk, y = cellType, fill = nCells)) +
+    geom_tile() + scale_fill_viridis() + rotate_x(angle = 45)
+```
+
+
+
+## Per cell class (coarse)
+
+```{r Data stats for parameter setting}
+cell_counts <- proj@cellColData %>%
+  as.data.frame() %>%
+  dplyr::group_by(cell_class, Condition, Sample) %>%
+  dplyr::summarise(nCells = n(), .groups="drop")
+
+# How many “subgroups” would pass default minCells?
+sum(cell_counts$nCells >= 40)
+# What’s the smallest?
+min(cell_counts$nCells)
+# What’s the 10th percentile?
+quantile(cell_counts$nCells, c(0.1, .9))
+
+```
+
+```{r Mock archr groups}
+archr_groups <- addGroupCoverages(ArchRProj = proj,
+                          groupBy = "cell_class",
+                          minCells = 50,
+                          maxCells = 1000,
+                          sampleRatio = 1,
+                          minReplicates = 13,
+                          maxReplicates = 16,
+                          returnGroups = TRUE,
+                          force = TRUE)
+```
+
+```{r ArchR pseudobulk for peak calling}
+## Flatten and inspect nested archr_groups
+
+# 1) Build a data.frame of cellType × pseudoBulk × nCells
+df_archr <- do.call(rbind, lapply(names(archr_groups), function(ct) {
+  grpList <- archr_groups[[ct]]
+  data.frame(
+    cellType   = ct,
+    pseudoBulk = names(grpList),
+    nCells     = lengths(grpList),
+    stringsAsFactors = FALSE
+  )
+}))
+
+# 2) View the first few rows
+head(df_archr)
+
+# 3) Summary statistics per cellType
+
+df_archr %>%
+  dplyr::group_by(cellType) %>%
+  dplyr::summarise(
+    nReplicates = n(),
+    minCells     = min(nCells),
+    medianCells  = median(nCells),
+    maxCells     = max(nCells)
+  )
+
+# 4) Full table sorted by nCells
+df_archr[order(df_archr$nCells), ]
+
+# 5) Inspect barcodes for a specific pseudobulk
+#    e.g. CGE → YK05_En7Cpos
+cellType <- "CGE"
+pseudo   <- "YK05_En7Cpos"
+head(archr_groups[[cellType]][[pseudo]], 10)
+
+
+ggplot(df_archr, aes(x = pseudoBulk, y = cellType, fill = nCells)) +
+    geom_tile() + scale_fill_viridis() + rotate_x(angle = 45)
+```
+
+# Peak per pseudobulk
+
+## Aggregate peaks
+
+```{r}
+peak <- bms::get_peak_mat_ranges(proj)
+
+peak_pb <- bms::get_bio_pseudobulk(
+    mat = peak$peak_mat,
+    cell_metadata = proj@cellColData,
+    feat_ranges = peak$peak_ranges,
+    type_col = "cell_type",
+    sample_col = "Sample",
+    sample_metadata = sample_metadata
+)
+
+print(assay(peak_pb, "cpm")[1:10, 1:3])
+```
+
+## Plots for detected peak cutoff
+
+```{r}
+cts <- as.matrix(counts(peak_pb))
+
+# 1) distribution of counts per peak
+m1 <- melt(cts)
+colnames(m1) <- c("Peak","Sample","Count")
+p <- ggplot(m1, aes(Count + 1)) +
+    geom_histogram(bins = 60) +
+    scale_x_log10() +
+    labs(title = "Histogram of peak counts across all samples",
+         x = "Count + 1 (log10)", y = "Frequency") 
+p + theme_BMS()
+```
+
+```{r}
+# 2) per-peak detection frequency
+df_det <- data.frame(
+    Peak = rownames(cts),
+    n_detected = rowSums(cts >= 2),
+    max_count  = apply(cts, 1, max),
+    mean_count = rowMeans(cts)
+)
+df_det$frac_detected <- df_det$n_detected / ncol(cts)
+
+p1 <- ggplot(df_det, aes(frac_detected)) +
+    geom_histogram(bins = 50) +
+    labs(title = "Fraction of samples in which each peak is detected (count ≥ 2)",
+         x = "Detection fraction", y = "Number of peaks") +
+    theme_BMS()
+
+p2 <- ggplot(df_det, aes(max_count + 1)) +
+    geom_histogram(bins = 50) +
+    scale_x_log10() +
+    labs(title = "Maximum count per peak",
+         x = "max(count) + 1 (log10)", y = "Number of peaks") +
+    theme_BMS()
+
+grid.arrange(p1, p2, ncol = 2)
+```
+The horizontal patterns are a result of calculating variance on very small discrete samples.
+
+We will see that the DESeq normalization gets rid of them later.
+
+```{r}
+library(matrixStats)
+
+cpm_mat <- assay(peak_pb, "cpm")
+df_mv <- data.frame(
+    Peak = rownames(cpm_mat),
+    mean_cpm = rowMeans(cpm_mat),
+    var_cpm  = rowVars(cpm_mat)
+)
+
+ggplot(df_mv, aes(mean_cpm + 1, var_cpm + 1)) +
+    geom_point(alpha = 0.3, size = 0.5) +
+    scale_x_log10() + scale_y_log10() +
+    labs(title = "Mean–variance plot for CPM",
+         x = "Mean CPM + 1 (log10)", y = "Variance CPM + 1 (log10)") +
+    theme_BMS() 
+```
+
+## Save or load from disk
+
+```{r Prepare peak_pb and filtered}
+########
+load_existing_peak_pb <- T
+########
+fn <- file.path(dataout, "peak_pb.rds")
+
+if (load_existing_peak_pb){
+    peak_pb <- readRDS(fn)
+} else{
+    saveRDS(peak_pb, fn)
+}
+
+metadata(peak_pb)$fn <- fn
+```
+
+## Find significantly variable peaks
+
+First, filter to detected peaks only. Use data-driven filter from the plots above.
+```{r}
+filtered_pb  <- bms::get_filtered_features(peak_pb,
+                                        min_count_threshold = 10,
+                                        min_sample_fraction = 0.05,
+                                        min_sample_count    = 2,
+                                        top_N               = NULL)
+```
+
+
+Then, model feature variance and find significantly variable ones.
+
+```{r Size factors}
+# Estimate size factors ====
+dds_fs <- DESeqDataSetFromMatrix(
+    countData = counts(filtered_pb),
+    colData = colData(filtered_pb),
+    design = ~ 1
+)
+
+dds_fs <- estimateSizeFactors(dds_fs)
+assay(filtered_pb, "size_normed") <- DESeq2::counts(dds_fs, normalized = T)
+
+# Plot cell type x sample size factor heatmap ====
+size_factors <- sizeFactors(dds_fs)
+sf_df <- colData(filtered_pb) %>%
+    as.data.frame() %>%
+    dplyr::mutate(size_factor = size_factors) %>%
+    dplyr::select(size_factor, cell_type, Sample)
+ggplot(sf_df, aes(y = cell_type, x = Sample, fill = size_factor)) +
+    geom_tile() +
+    scale_fill_viridis() +
+    rotate_x(45)
+```
+
+```{r Dispersion and feature selection}
+dds_fs <- estimateDispersions(dds_fs)
+plotDispEsts(dds_fs)
+
+disp_df <- mcols(dds_fs) %>%
+    as.data.frame() %>%
+    dplyr::mutate(dispRatio = dispersion / dispFit,
+                  log2dispRatio = log2(dispRatio),
+                  pvalue = stats::pchisq(dispRatio, df = 1, lower.tail = F)) %>%
+    dplyr::select(baseMean, baseVar, dispersion, dispFit, dispRatio, log2dispRatio, pvalue)
+
+hist(disp_df$pvalue)
+var_feat_deseq <- disp_df %>%
+    dplyr::filter(pvalue < 0.1) %>%
+    rownames()
+
+topn_filtered <- bms::get_filtered_features(peak_pb,
+                                        min_count_threshold = 10,
+                                        min_sample_fraction = 0.2,
+                                        min_sample_count    = 2,
+                                        top_N               = 5000)
+
+jaccard_deseq_top15k <- get_jaccard(var_feat_deseq, rownames(topn_filtered))
+cat(sprintf("Number of DESeq features: %d\n", length(var_feat_deseq)))
+cat(sprintf("Jaccard(DESeq2, top15k) = %.4f", jaccard_deseq_top15k))
+```
+
+```{r Legacy feature selection for Jaccard index only}
+var_stats <- modelGeneVar(counts(filtered_pb))
+
+sig_feats <- rownames(var_stats)[var_stats$FDR < 0.01 & var_stats$bio > 0.1]
+length(sig_feats)
+
+var_stats_fil <- var_stats[sig_feats,]
+var_stats_fil$bio_frac <- var_stats_fil$bio / var_stats_fil$total
+
+hvgs <- getTopHVGs(var_stats_fil, n = length(var_feat_deseq), var.field = "bio_frac")
+
+jaccard_deseq_var15k <- get_jaccard(var_feat_deseq, hvgs)
+cat(sprintf("\nJaccard(DESeq2, top bio var fraction features with the same length) = %.4f", jaccard_deseq_var15k))
+
+rm(var_stats, var_stats_fil)
+```
+
+```{r}
+ggplot(disp_df[var_feat_deseq,],
+       aes(x = baseMean, y = dispRatio, colour = pvalue)) +
+    # scale_y_log10() +
+    geom_point(alpha = 0.05)
+```
+
+```{r}
+ggplot(disp_df, aes(dispFit, dispersion)) +
+  geom_point(alpha = 0.1, colour = "grey") +          # ALL points
+  geom_point(data = disp_df[var_feat_deseq, ],        # selected peaks
+             aes(colour = pvalue), alpha = 0.5) +
+  scale_y_log10() + scale_x_log10()
+```
+
+We will continue with this.
+
+```{r Subset to variable features}
+var_pb  <- filtered_pb[var_feat_deseq, , drop = FALSE]
+```
+
+```{r}
+########
+load_existing_variable_pb <- F
+########
+fn <- file.path(dataout, "var_pb.rds")
+
+if (load_existing_variable_pb){
+    var_pb <- readRDS(fn)
+} else{
+    saveRDS(var_pb, fn)
+}
+```
+
+
+```{r Peak count distribution histograms}
+var_peak_counts <- assay(var_pb)
+hist(log10(var_peak_counts + 1), breaks = 10)
+hist(log10(var_peak_counts[var_peak_counts > 0] + 1), breaks = 10)
+```
+
+
+```{r Optionally remove large objects}
+rm(peak_pb, filtered_pb, topn_filtered, var_feat_deseq, jaccard_deseq_top15k)
+```
+
+# Global DE model (Start here if load cached data)
+
+A global model with all pairwise condition comparisons per cell type. 
+Low in statistical power but used to enrich for peaks for k-means.
+
+## Run DESeq2
+
+```{r}
+##########################
+force_deseq2 <- T
+##########################
+
+
+if (force_deseq2){
+    deseq_res_ct <- bms::run_deseq2_peak_global(var_pb,
+                                            condition_pairs = bms::condition_pairs_diff,
+                                            cell_types      = bms::cell_types_diff)
+    saveRDS(deseq_res_ct, get_outdir("deseq_peaks_results_list.rds"))
+} else {
+    deseq_res_ct <- readRDS(get_outdir("deseq_peaks_results_list.rds"))
+}
+```
+
+# K-means Co-clustering
+
+### Stack MultiAssayExperiment
+
+```{r Stack, warning=FALSE}
+# var_pb <- var_pb[, colData(var_pb)$Sample != "YK11_En28Cpos"]
+merge_samples <- list(
+    "En28Repos" = c("YK15_En28ReBpos", "YK17_En28ReCpos")
+)
+stacked_mae <- stack_multi_experiment(
+    var_pb,
+    deseq_res_ct$results_list,
+    vsd_list = deseq_res_ct$vsd_list,
+    feat_selection = list(pvalue_frac = 0.01),
+    lfc_thresh = 0.01,
+    merge_samples = merge_samples
+)
+
+sprintf("Stacked fold change matrix has %d features from %d cell types.", 
+       nrow(stacked_mae[["foldchange"]]), length(unique(rowData(stacked_mae[["foldchange"]])$cell_type))) %>% cat()
+```
+
+
+
+
+### Choose k
+
+```{r Choose k}
+fc_mat <- assay(stacked_mae[["condition"]], "logcpm_z")
+
+k_grid  <- seq(3,20,1)    
+n_runs  <- 3       
+set.seed(1)         
+
+res <- expand.grid(k = k_grid, run = seq_len(n_runs))
+res$mean_sil <- NA_real_
+
+for (ii in seq_len(nrow(res))) {
+    k  <- res$k[ii]
+    cat(sprintf("%d\t", k))
+    km <- kmeans(fc_mat, centers = k, nstart = 25)
+    res$mean_sil[ii] <- km$tot.withinss
+}
+
+summ <- aggregate(mean_sil ~ k, res,
+                  function(x) c(med = median(x), q1 = quantile(x, .25),
+                                q3 = quantile(x, .75)))
+summ <- do.call(data.frame,
+                list(k = summ$k, summ$mean_sil))   # tidy columns
+colnames(summ) <- c("k", "med", "q1", "q3")
+
+ggplot(summ, aes(k, med)) +
+    geom_line() +
+    geom_point(size = 2) +
+    geom_errorbar(aes(ymin = q1, ymax = q3), width = 0.1) +
+    labs(title = "Total within cluster sum of squares vs. k",
+         x = "k (number of clusters)",
+         y = "Within cluster SS (± quantiles)") +
+    ylim(c(0,22000)) +
+    theme_BMS()
+ggsave(get_outdir("tot_within_ss_vs_k.pdf"))
+```
+```{r}
+knee_idx <- uik(summ$k, summ$med)
+cat("Knee index: ")
+cat(knee_idx)
+```
+
+
+### Plot heatmap
+
+```{r Plot big heatmap, fig.height=8, fig.width=16}
+k_number <- 7
+clusters <- bms::perform_kmeans(assay(stacked_mae[["condition"]], "logcpm_z"), k_number)
+
+kmhm <- plot_kmeans_heatmap(stacked_mae, clusters,
+                    pb_merged_assay   = "logcpm",
+                    cond_assay = "logcpm",
+                    silhouette_experiment = "condition",
+                    silhouette_assay = "logcpm_z",
+                    center0_ls = list(fc = TRUE, cond = FALSE, pb = FALSE))
+```
+
+### QC checks
+
+```{r, fig.height=4, fig.width=12}
+md <- as.data.frame(colData(peak_pb))
+qc <- md %>%
+  mutate(
+    LibrarySize = colSums(counts(peak_pb)),    # recompute to cross‐check NumCounts
+    FRiP        = NumCounts / LibrarySize      # fraction of reads in peaks
+  )
+
+p1 <- ggplot(qc, aes(x = Condition, y = LibrarySize)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  labs(title = "Pseudobulk library size (peak counts)", y = "LibrarySize") +
+  theme_BMS()
+
+# B: number of single cells per pseudobulk
+p2 <- ggplot(qc, aes(x = Condition, y = NumCells)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  labs(title = "Cells per pseudobulk", y = "NumCells") +
+  theme_BMS()
+
+# C: FRiP per pseudobulk
+p3 <- ggplot(qc, aes(x = Condition, y = FRiP)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  labs(title = "FRiP (peak-counts / total reads)", y = "FRiP") +
+  theme_BMS()
+
+# display together
+library(gridExtra)
+grid.arrange(p1, p2, p3, ncol = 3)
+```
+
+## Shuffle test
+
+#### Condition-shuffle test
+```{r}
+set.seed(42)
+k_number <- 7
+n_perm <- 100
+# Initialize vector to store results
+sil_null <- numeric(n_perm)
+
+# Use for loop instead of sapply
+for(i in seq_len(n_perm)) {
+    if (i %% 10 == 10) cat(i); cat('\t')
+    perm <- shuffle_conditions(stacked_mae)
+    sil_null[i] <- bms::get_mean_silhouette_fc(perm, k = k_number, assay_name = "fc_z_perm")
+    # print(paste("Silhouette value:", sil_null[i]))  # Debug print
+}
+
+ggplot(data.frame(null = sil_null), aes(null)) +
+    geom_histogram(binwidth = 0.001, fill = "mistyrose3") +
+    geom_vline(xintercept = sil_real, colour = "darkred") +
+    labs(title = "Condition shuffle", x = "mean silhouette")
+```
+
+
+
+#### Within-pair shuffle
+
+```{r}
+real_fc  <- assay(stacked_mae[["foldchange"]], "fc_z")
+real_stat <- bms::get_mean_silhouette(real_fc, k_number)
+
+n_perm <- 100
+null_stats <- numeric(n_perm)
+
+for (i in seq_len(n_perm)) {
+    perm_fc  <- shuffle_within_pair(real_fc, seed = i)   # sign-flip
+    null_stats[i] <- bms::get_mean_silhouette(perm_fc, k_number)
+}
+
+emp_p <- mean(null_stats >= real_stat)  # higher silhouette is better
+
+ggplot(data.frame(null_stat = null_stats), aes(null_stat)) +
+    geom_histogram(bins = 40, fill = "mistyrose3", colour = "black") +
+    geom_vline(xintercept = real_stat, colour = "darkred", linewidth = 1) +
+    labs(title = "Mean silhouette width: real vs. within-pair shuffle",
+         x = "mean silhouette width", y = "count") +
+    theme_BMS()
+```
+
+
+# Per cell type
+
+First use the k-means from co-clustering, but plot separate heatmaps.
+
+```{r Plot per cell type heatmap, fig.height=8, fig.width=16}
+for (ct in bms::cell_types_diff) {
+    kmhm <- plot_kmeans_heatmap(stacked_mae, 
+                                clusters,
+                        pb_assay = "logcpm",
+                        cond_assay = "logcpm",
+                        silhouette_experiment = "condition",
+                        silhouette_assay = "logcpm_z",
+                        center0_ls = list(fc = TRUE, cond = FALSE, pb = FALSE),
+                        cell_type = ct)
+}
+```
+
+
+```{r}
+k_number <- 7
+results_list <- list()
+
+for (ct in bms::cell_types_diff) {
+    cat('\n');cat(ct); cat('\n')
+    perm_res <- bms::perform_cell_type_shuffle_tests(stacked_mae, ct, k_number, 
+                                         n_perm = 1000, seed = 42)
+    print(perm_res$plots)
+    # Log results in a list
+    results_list[[ct]] <- data.frame(
+        CellType = ct,
+        EmpP_sil = perm_res$emp_p_sil,
+        EmpP_WithinSS = perm_res$emp_p_withinss,
+        stringsAsFactors = FALSE
+    )
+}
+
+# Combine all results into a single data frame
+summary_df <- do.call(rbind, results_list)
+```
+
+```{r}
+# Calculate negative log p-values for both metrics
+summary_df$nlogp_sil <- -log10(summary_df$EmpP_sil)
+summary_df$nlogp_withinss <- -log10(summary_df$EmpP_WithinSS)
+
+# Create side by side plots
+p1 <- ggplot(summary_df, aes(x = CellType, y = nlogp_sil)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") +
+  geom_hline(yintercept = -log10(0.1), linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(
+    title = "Silhouette Score",
+    x = "Cell Type",
+    y = "- log10(Empirical p-value)"
+  )
+
+p2 <- ggplot(summary_df, aes(x = CellType, y = nlogp_withinss)) +
+  geom_bar(stat = "identity", fill = "salmon", color = "black") + 
+  geom_hline(yintercept = -log10(0.1), linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(
+    title = "Within-cluster Sum of Squares",
+    x = "Cell Type", 
+    y = "- log10(Empirical p-value)"
+  )
+
+# Display plots side by side
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+```{r}
+p3 <- ggplot(summary_df, aes(x = nlogp_sil, y = nlogp_withinss, label = CellType)) +
+  geom_point(color = "blue", size = 3) +
+  geom_text(vjust = -0.5, hjust = 0.5, size = 3, check_overlap = TRUE) +
+  geom_hline(yintercept = -log10(0.1), linetype = "dashed", color = "red") +
+  geom_vline(xintercept = -log10(0.1), linetype = "dashed", color = "red") +
+  labs(
+    title = "Empirical p-values",
+    x = "- log10(Silhouette p-value)",
+    y = "- log10(WithinSS p-value)"
+  ) +
+    xlim(c(0,2.5)) + ylim(c(0,3.5))
+p3
+```
+
+
+## Reproducibility of peaks between cell types
+
+```{r}
+# Perform k-means clustering on the stacked MAE object
+k_number <- 7  # Number of clusters
+clusters <- bms::perform_kmeans(assay(stacked_mae[["condition"]], "logcpm_z"), k_number)
+```
+
+## Group Cell Types and Plot Venn Diagrams
+
+```{r}
+# Define cell type groups
+# cell_type_groups <- list(
+#   exc = bms::cell_types_exc,
+#   inh = bms::cell_types_inh
+# )
+cell_type_groups <- bms::cell_types_diff
+
+
+# Plot Venn diagram for each cluster
+library(VennDiagram)
+for (cluster in 1:k_number) {
+  cat("Cluster:", cluster, "\n")
+    df <- rowData(se_cond)
+    df <- df[clusters == cluster,]
+  peak_sets <- df$feat_name
+  venn.plot <- venn.diagram(
+    x = peak_sets,
+    category.names = names(cell_type_groups),
+    filename = NULL,
+    output = TRUE
+  )
+  grid.draw(venn.plot)
+}
+```
+
+
+
+# Interpret k-means clusters
+
+```{r Validate clustered DAR data}
+#' union_dar_names - GRanges object, annotation of the DARs
+#'     It comes from union_dar_names <- top_peakSet[union_dar_idx]
+#' gene_clusters$Clusters - k-means cluster identities of the DARs
+stopifnot(length(union_dar_names) == length(gene_clusters$Cluster))
+```
+
+### Basic peak features per cluster
+
+
+```{r Distance to TSS per k-means cluster, fig.width=3, fig.height=5}
+library(forcats)
+
+# Create a data frame combining distance to TSS and cluster assignments.
+df <- data.frame(
+  distToTSS = union_dar_names$distToTSS,
+  Cluster  = gene_clusters
+)
+
+# Convert Cluster to a factor and sort clusters numerically.
+# Then reverse the order so that cluster 1 appears at the top after coord_flip.
+df$Cluster <- factor(df$Cluster, levels = sort(unique(df$Cluster)))
+df$Cluster <- fct_rev(df$Cluster)
+
+df_tmp <- df %>%
+    dplyr::filter(distToTSS < 1e3)
+
+# Create a horizontal violin plot
+ggplot(df_tmp, aes(x = Cluster, y = distToTSS)) +
+  geom_violin(trim = FALSE, fill = "skyblue") +
+  coord_flip() +
+  xlab("K-means Cluster") +
+  ylab("Distance to TSS") +
+  theme_BOR() +
+    ggtitle(cell_type)
+```
+
+```{r Peak type per k-means cluster stacked bars, fig.width=4, fig.height=5}
+library(scales)
+
+# Create a data frame combining cluster assignments and peak types.
+df2 <- data.frame(
+  Cluster = gene_clusters,              # k-means cluster identities
+  peakType = union_dar_names$peakType     # peak type annotation
+)
+
+# Convert Cluster to a factor ordered numerically, then reverse so that Cluster 1 appears at the top.
+df2$Cluster <- factor(df2$Cluster, levels = sort(unique(df2$Cluster)))
+df2$Cluster <- fct_rev(df2$Cluster)
+
+# Create a horizontal stacked bar plot using position = "fill" to show proportions.
+ggplot(df2, aes(x = Cluster, fill = peakType)) +
+  geom_bar(position = "fill", width = .9) +
+  coord_flip() +
+  scale_y_continuous(labels = percent_format()) +
+  xlab("K-means Cluster") +
+  ylab("Proportion of Peak Types") +
+    scale_fill_BOR() +
+  theme_BOR() +
+    ggtitle(cell_type)
+
+```
+
+
+
+#### DAR motif enrichment
+
+```{r Add motif annotation}
+proj <- addMotifAnnotations(proj, morifSet = "encode", force = F)
+```
+
+
+```{r}
+# Add a unique name for each peak
+union_dar_names$name <- paste(seqnames(union_dar_names), start(union_dar_names), end(union_dar_names), sep = "_")
+
+#' matches - RangedSummarizedExperiment object, (peaks, motif)
+matches <- getMatches(ArchRProj = proj, name = "Motif")
+rownames(matches) <- paste(seqnames(matches), start(matches), end(matches), sep = "_")
+```
+
+```{r}
+motif_mat <- getMatrixFromProject(proj, useMatrix = "MotifMatrix")
+```
+
+
+##### Pick a cluster
+```{r}
+### Pick a cluster
+km_cls <- 9
+df <- data.frame(
+  name = union_dar_names$name,
+  GC = union_dar_names$GC,
+  Cluster  = gene_clusters
+) %>% dplyr::filter(Cluster == km_cls)
+
+#' matches_dar - (n_dar, motif)
+#' Crashed here once for unknown reasons
+matches_dar <- matches[df$name]
+
+#### Define your background peaks: ####
+# Peaks called in the cell type of concern
+bg <- peakSet[names(peakSet) == cell_type]
+
+sprintf("%d DARs against %d background peaks", length(matches_dar), length(bg))
+```
+
+```{r Perform Fisher's exact tests for TF motifs}
+# Get motif matching for background peaks.
+# Create unique names for the background peaks as done for DARs.
+bg_names <- paste(seqnames(bg), start(bg), end(bg), sep = "_")
+matches_bg <- matches[rownames(matches) %in% bg_names]
+
+# Extract the motif presence matrices.
+# (Assuming the assay in 'matches' gives a binary indicator or a score where >0 indicates presence)
+mat_dar <- assay(matches_dar)
+mat_bg  <- assay(matches_bg)
+
+# Ensure both matrices have the same set of motifs (columns)
+motifs <- intersect(colnames(mat_dar), colnames(mat_bg))
+
+# Initialize a results data frame to store the Fisher test results.
+results <- data.frame(
+  Motif       = motifs,
+  OddsRatio   = NA,
+  pValue      = NA,
+  DAR_with    = NA,
+  DAR_without = NA,
+  BG_with     = NA,
+  BG_without  = NA,
+  stringsAsFactors = FALSE
+)
+
+# Loop over each motif and perform Fisher's exact test.
+for(i in seq_along(motifs)){
+  motif <- motifs[i]
+  
+  # For DARs: count peaks with (a) and without (b) the motif.
+  a <- sum(mat_dar[, motif] > 0, na.rm = TRUE)
+  b <- nrow(mat_dar) - a
+  
+  # For background: count peaks with (c) and without (d) the motif.
+  c <- sum(mat_bg[, motif] > 0, na.rm = TRUE)
+  d <- nrow(mat_bg) - c
+  
+  # Construct a 2x2 contingency table:
+  #            Motif Present    Motif Absent
+  # DARs              a                b
+  # Background        c                d
+  contingency <- matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)
+  
+  # Perform Fisher's exact test.
+  ft <- fisher.test(contingency)
+  
+  results$OddsRatio[i]   <- ft$estimate
+  results$pValue[i]      <- ft$p.value
+  results$DAR_with[i]    <- a
+  results$DAR_without[i] <- b
+  results$BG_with[i]     <- c
+  results$BG_without[i]  <- d
+}
+
+# Adjust p-values for multiple testing (using FDR)
+results$adjPValue <- p.adjust(results$pValue, method = "fdr")
+
+# Sort the results by adjusted p-value.
+results <- results[order(results$adjPValue), ]
+
+# Display the results.
+print(results)
+```
+
+
+```{r, fig.width=16, fig.height=8}
+library(seqLogo)
+library(motifStack)
+
+pwmList <- proj@peakAnnotation$Motif$motifs
+
+# Assume df$TF contains your top 10 motif names, e.g. "Fos_104", "Bach1_108", etc.
+motifsToPlot <- results[results$OddsRatio > 1, "Motif"][1:20]  # top 10 from your dataframe
+
+# Extract each motif from pwmList, convert to probability matrix, then build a motifStack "pfm" object
+motifList <- list()
+for (mName in motifsToPlot) {
+  if (mName %in% names(pwmList)) {
+    pwmObj <- pwmList[[mName]]           # TFBSTools PWMatrix
+    mat <- pwmObj@profileMatrix         # log2 odds
+    mat <- 2^mat                        # exponentiate
+    mat <- apply(mat, 2, function(x) x / sum(x))  # normalize columns
+    # Convert to motifStack's 'pfm' S4 object
+    motifList[[mName]] <- new("pfm", mat = mat, name = mName)
+  } else {
+    message("Motif not found: ", mName)
+  }
+}
+
+# Create a list to hold motif grobs
+motifGrobList <- list()
+
+# For each motif, plot the seqLogo, capture it as a grob, and add a title
+for (mName in motifsToPlot) {
+  if (mName %in% names(motifList)) {
+    # Start a new grid page and draw the motif logo
+    logo_grob <- grid.grabExpr(seqLogo(motifList[[mName]]@mat, xaxis = FALSE, yaxis = FALSE))
+    # logo_grob <- grid::resizeGrob(logo_grob, width = 2 * grobWidth(logo_grob), height = 2 * grobHeight(logo_grob))
+
+    # Create a title grob with the motif name
+    title_grob <- textGrob(mName, gp = gpar(fontsize = 10, fontface = "bold"))
+    # Combine the logo and title into one grob (title on top)
+    combined_grob <- arrangeGrob(logo_grob, top = title_grob, padding = unit(0, "mm"))
+    motifGrobList[[mName]] <- combined_grob
+  }
+}
+
+# Arrange the 10 motif grobs in a 2 x 5 grid
+grid.arrange(grobs = motifGrobList, nrow = 4, ncol = 5, 
+             padding = unit(0, "mm"))
+print(km_cls)
+# seqLogo(motifList[[1]]@mat, xaxis = F, yaxis = F)
+# # Now plot them in a stacked layout
+# plotMotifLogo(motifList[[1]]) 
+```
+
+```{r}
+# Search for the motif names
+tfs <- c(#"Fos_", "Npas4_", "Egr1_", "Creb1_", "Egr3_",
+         "Nr4a1_", "Atf")
+getFeatures(proj, select = paste(tfs, collapse="|"), useMatrix = "MotifMatrix")
+
+# Check out a few motif names
+motifs <- c(#"Fos_104", "Npas4_80", "Egr1_190", "Egr3_183", "Creb1_109",
+            "Nr4a1_847", "Atf2_112", "Atf3_110", "Atf4_121", "Atf5_791")
+
+for (m in motifs){
+    pwmObj <- pwmList[[m]]
+    # 1) Get the numeric matrix (log-odds, base 2)
+    mat <- pwmObj@profileMatrix   # from TFBSTools
+    # 2) Exponentiate to convert from log2 -> linear scale
+    mat <- 2^mat
+    # 3) Normalize each column to sum to 1
+    mat <- apply(mat, 2, function(x) x / sum(x))
+    # 4) Plot with seqLogo
+    seqLogo(mat, xaxis = F, yaxis = F)
+}
+```
+## ChromVAR score dynamics
+```{r Prepare aggregated ChromVAR score by Condition matrix}
+motif_mat_ct <- motif_mat[, motif_mat$cell_type == cell_type]
+
+#' motif_avg - (Condition, TF)
+motif_avg <- t(assay(motif_mat_ct)) %>%
+    aggregate(by=list(motif_mat_ct$Condition), FUN = mean) %>% t()
+colnames(motif_avg) <- motif_avg[1,]
+motif_avg <- motif_avg[-1,]
+motif_avg <- motif_avg[, condition_order]
+class(motif_avg) <- "numeric"
+
+motif_avg_z <- t(scale(t(motif_avg)))
+```
+
+```{r, fig.width=6, fig.height=8}
+set.seed(42)
+kmeans_res <- kmeans(motif_avg_z, centers = 20, nstart = 20)
+gene_clusters <- data.frame(Cluster = factor(kmeans_res$cluster),
+                            row.names = rownames(motif_avg_z))
+annotation_row <- data.frame(Cluster = gene_clusters$Cluster[order(gene_clusters$Cluster)])
+gaps_row <- which(diff(as.integer(annotation_row$Cluster)) != 0)
+
+val <- quantile(motif_avg, c(0.01, 0.99))
+breaks = seq(val[[1]], val[[2]], length.out = 100)
+p1 <- pheatmap(motif_avg[order(gene_clusters$Cluster),],
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         show_rownames = FALSE,
+         annotation_row = annotation_row,
+         gaps_row = gaps_row,
+         cellwidth = 20,
+         gaps_col = c(2,4,6),
+         breaks = breaks,
+         main = "ChromVAR pre z-score")
+
+p2 <- pheatmap(motif_avg_z[order(gene_clusters$Cluster),],
+         cluster_rows = FALSE,
+         cluster_cols = FALSE,
+         show_rownames = FALSE,
+         annotation_row = annotation_row,
+         gaps_row = gaps_row,
+         cellwidth = 20,
+         gaps_col = c(2,4,6),
+         main = "Row z-scored")
+
+p1 + p2
+```
+
+```{r}
+rownames(gene_clusters)[gene_clusters$Cluster == "1"]
+```
+```{r, fig.width=16, fig.height=8}
+cls_num = "11"
+# Assume df$TF contains your top 10 motif names, e.g. "Fos_104", "Bach1_108", etc.
+motifsToPlot <- rownames(gene_clusters)[gene_clusters$Cluster == cls_num][1:20]  # top 10 from your dataframe
+
+# Extract each motif from pwmList, convert to probability matrix, then build a motifStack "pfm" object
+motifList <- list()
+for (mName in motifsToPlot) {
+  if (mName %in% names(pwmList)) {
+    pwmObj <- pwmList[[mName]]           # TFBSTools PWMatrix
+    mat <- pwmObj@profileMatrix         # log2 odds
+    mat <- 2^mat                        # exponentiate
+    mat <- apply(mat, 2, function(x) x / sum(x))  # normalize columns
+    # Convert to motifStack's 'pfm' S4 object
+    motifList[[mName]] <- new("pfm", mat = mat, name = mName)
+  } else {
+    message("Motif not found: ", mName)
+  }
+}
+
+# Create a list to hold motif grobs
+motifGrobList <- list()
+
+# For each motif, plot the seqLogo, capture it as a grob, and add a title
+for (mName in motifsToPlot) {
+  if (mName %in% names(motifList)) {
+    # Start a new grid page and draw the motif logo
+    logo_grob <- grid.grabExpr(seqLogo(motifList[[mName]]@mat, xaxis = FALSE, yaxis = FALSE))
+    # logo_grob <- grid::resizeGrob(logo_grob, width = 2 * grobWidth(logo_grob), height = 2 * grobHeight(logo_grob))
+
+    # Create a title grob with the motif name
+    title_grob <- textGrob(mName, gp = gpar(fontsize = 10, fontface = "bold"))
+    # Combine the logo and title into one grob (title on top)
+    combined_grob <- arrangeGrob(logo_grob, top = title_grob, padding = unit(0, "mm"))
+    motifGrobList[[mName]] <- combined_grob
+  }
+}
+
+# Arrange the 10 motif grobs in a 2 x 5 grid
+grid.arrange(grobs = motifGrobList, nrow = 4, ncol = 5, 
+             padding = unit(0, "mm"))
+```
+
+
+```{r}
+pheatmap(
+    motif_avg["Sp4_167",],
+    cluster_cols = F
+)
+plot(motif_avg["Sp4_167",])
+
+```
+
+
+# Overall accessibility
+
+```{r}
+filtered_metadata <- dplyr::rename(filtered_metadata, CombinedID = "Sample")
+
+#' pb_metadata - pseudobulk per row metadata.
+#' colnames:
+#' "CombinedID"  "cell_type"   "NumCells"    "SampleID"    "sample_id"   "Experiment"  "Group"       "Gating"      "Status"     
+#' "AgeWeeks"    "Gender"      "CaptureDate" "Condition"   "YK_ID"       "Time"        "Recall"    
+pb_metadata <- left_join(filtered_metadata, 
+          sample_metadatadata, by = "CombinedID")
+
+#' Sum of peak counts for each pseudobulk averaged per cell
+pb_sums <- colSums(peak_pb$counts) / filtered_metadata$NumCells
+
+pb_data <- data.frame(Condition = pb_metadata$Condition, Peak_Sums = c(pb_sums))
+
+# Group by Condition and calculate the mean per-cell peak counts
+condition_means <- pb_data %>%
+  dplyr::group_by(Condition) %>%
+  dplyr::summarise(Mean_peak_pb$counts = mean(Peak_Sums, na.rm = TRUE))
+
+# Print results
+print(condition_means)
+
+# --- Calculate Log2 Fold Changes for Each Pos/Neg Pair ---
+fc_pairs <- list(
+  "En7pos_vs_En7neg" = c("En7pos", "En7neg"),
+  "En7Repos_vs_En7Reneg" = c("En7Repos", "En7Reneg"),
+  "En28pos_vs_En28neg" = c("En28pos", "En28neg"),
+  "En28Repos_vs_En28Reneg" = c("En28Repos", "En28Reneg")
+)
+
+fc_matrix <- sapply(fc_pairs, function(pair) {
+    pos <- pair[1]
+    neg <- pair[2]
+    if (!(pos %in% colnames(log_norm_expr) & neg %in% colnames(log_norm_expr))) {
+        stop(paste("One or both conditions not found in log-normalized matrix:", pos, neg))
+    }
+    log2((log_norm_expr[, pos] + 1e-5) / (log_norm_expr[, neg] + 1e-5))
+})
+rownames(fc_matrix) <- rownames(log_norm_expr)
+```
+
+```{r}
+# Define fc_pairs as a dataframe for easier handling
+fc_pairs <- data.frame(
+  Pair = c("En7pos_vs_En7neg", "En7Repos_vs_En7Reneg", "En28pos_vs_En28neg", "En28Repos_vs_En28Reneg"),
+  Condition1 = c("En7pos", "En7Repos", "En28pos", "En28Repos"),
+  Condition2 = c("En7neg", "En7Reneg", "En28neg", "En28Reneg")
+)
+
+# Reshape condition_means for plotting
+condition_means$Pair <- NA  # Initialize pair column
+
+# Assign each condition to a pair based on fc_pairs
+for (i in 1:nrow(fc_pairs)) {
+  condition_means$Pair[condition_means$Condition %in% fc_pairs[i, 2:3]] <- fc_pairs$Pair[i]
+}
+
+# Create grouped bar plot
+ggplot(condition_means, aes(x = Pair, y = Mean_peak_pb$counts, fill = Condition)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8)) +
+  labs(title = "Grouped Bar Plot of Mean Peak Counts", x = "Condition Pairs", y = "Mean Peak Counts") +
+  theme_BMS() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+for (ct in all_cell_types){
+    idx <- pb_metadata$cell_type == ct
+    df <- data.frame(
+        Condition = pb_metadata[idx,]$Condition,
+        MeanCounts  = c(pb_sums)[idx])
+    ggplot(df, aes(x = Condition, y = MeanCounts)) +
+        geom_jitter()
+}
+```
+```{r}
+df <- data.frame(proj@cellColData) %>%
+    dplyr::group_by(cell_type, Condition) %>%
+    dplyr::summarise(mean_FRIP = mean(FRIP),
+                     mean_TSS_enrich = mean(TSSEnrichment))
+df
+
+ggplot(df, aes(x=Condition, y=mean_TSS_enrich, color=cell_type)) +
+    geom_jitter()
+```
+
+
+# Session info
+
+```{r sinfo, cache = FALSE}
+sessionInfo()
+```
+
+# Per cell type shuffle tests
+
+```{r Perform shuffle tests per cell type, fig.height=8, fig.width=16}
+# Set parameters
+k_number <- 7
+n_perm <- 100
+set.seed(42)
+
+# Initialize list to store results
+shuffle_results <- list()
+
+# Perform shuffle tests for each cell type
+for (ct in bms::cell_types_diff) {
+    cat(sprintf("\nPerforming shuffle tests for cell type: %s\n", ct))
+    
+    # Run shuffle tests
+    results <- perform_cell_type_shuffle_tests(
+        mae = stacked_mae,
+        cell_type = ct,
+        k_number = k_number,
+        n_perm = n_perm,
+        seed = 42,
+        cond_assay = "logcpm_z"
+    )
+    
+    # Store results
+    shuffle_results[[ct]] <- results
+    
+    # Print empirical p-values
+    cat(sprintf("Empirical p-value (condition shuffle): %.3f\n", results$emp_p_condition))
+    cat(sprintf("Empirical p-value (within-pair shuffle): %.3f\n", results$emp_p_within))
+    
+    # Plot results
+    grid.arrange(
+        results$plots$condition,
+        results$plots$within,
+        ncol = 2
+    )
+}
+```
+
+# Summary of shuffle test results
+
+```{r Summarize shuffle test results}
+# Create summary data frame
+summary_df <- do.call(rbind, lapply(names(shuffle_results), function(ct) {
+    data.frame(
+        CellType = ct,
+        RealStat = shuffle_results[[ct]]$real_stat,
+        EmpP_Condition = shuffle_results[[ct]]$emp_p_condition,
+        EmpP_Within = shuffle_results[[ct]]$emp_p_within
+    )
+}))
+
+# Print summary table
+knitr::kable(summary_df, digits = 3, caption = "Summary of shuffle test results")
+```

@@ -1,0 +1,584 @@
+---
+title: "BMS"
+author: "Yuxi Ke"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    theme: "flatly"
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r config, warning = FALSE}
+
+# **MODIFY THIS CHUNK**
+project_id <- "bms" # determines the name of the cache folder
+doc_id     <- file.path("03-2_cell_type_labels/") # determines name of the subfolder of `figures` where pngs/pdfs are saved
+out        <- file.path(here::here("Output/"), doc_id); dir.create(out, recursive = TRUE)
+figout     <- file.path(here::here("Fig/"), doc_id); dir.create(figout, recursive = TRUE)
+```
+
+```{r setup, include = FALSE}
+
+# NO NEED TO MODIFY THIS CHUNK
+here::i_am(".gitignore")
+knitr::opts_chunk$set(message = TRUE,
+                      warning = FALSE,
+                      error = FALSE,
+                      cache = FALSE,
+                      fig.path = figout,
+                      fig.keep = "all",
+                      dev = c("png", "pdf"),
+                      cache.lazy = FALSE)
+
+grDevices::pdf.options(useDingbats = FALSE)
+options(knitr.table.format = "html") 
+
+```
+
+***
+
+# Overview
+
+This script creates both data driven and transferred cell type labels.
+The transferred labels come from Allen Institute data.
+
+Input:
+
+    - An ArchR project after per cell QC
+    - A Seurat object after per cell QC
+    - An Allen reference data Seurat object
+
+Output:
+
+    - An ArchR project (saved to original path)
+    - A Seurat object (saved to original path)
+    
+Yuxi Ke, 09/06/2024
+
+
+# Libraries
+
+```{r libs, warning = FALSE, message = FALSE}
+library(here)
+library(Rcpp)
+source(here::here("Scripts/Lib/plotting_Greenleaf.R"))
+source(here::here("Scripts/Lib/plotting.R"))
+source(here::here("Scripts/Lib/util.R"))
+source(here::here("Scripts/Lib/correlation_utils.R"))
+sourceCpp(here::here("Scripts/Lib/rcpp_utils.cc"))
+
+
+library(Seurat)
+library(dbscan)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ArchR)
+addArchRThreads(threads = parallel::detectCores() - 2) # 24 cores in total when on compute node, minus 2
+addArchRGenome("mm10")
+
+ggplot2::theme_set(theme_BOR(border=FALSE))
+
+set.seed(100)
+
+```
+
+
+# Load data
+
+## Define file names
+
+```{r, include=TRUE}
+location <- "local" # {"local", "sherlock"}
+
+if (location == "local") {
+    archr.proj.path <- here::here("Data/ArchRProjects/BMS_clean")
+    gex.obj.path <- here::here("Data/SeuratObjects/gex_clean.rds")
+    allen.obj.path <- here::here("Data/SeuratObjects/Allen_PFC_1in20_02-1.rds")    
+} else {
+    oak.path <- "/oak/stanford/groups/wjg/kyx/data/bms"
+    archr.proj.path <- file.path(oak.path, "archr/BMS_early_clean")
+    gex.obj.path <- file.path(oak.path, "seurat/BMS_early_clean.rds")
+    allen.obj.path <- here::here("Data/SeuratObjects/Allen_PFC_1in20.rds")
+}
+```
+
+
+## Read data
+
+```{r}
+proj <- loadArchRProject(archr.proj.path, showLogo = FALSE)
+gex <- readRDS(gex.obj.path)
+allen <- readRDS(allen.obj.path)
+```
+
+
+# Data-driven labels
+
+Here, we perform data-driven clustering on both modalities. 
+These labels will be compared to Allen-transferred labels later for validation.
+
+
+## GEX
+
+### PC plots
+Plot the relation between the first few PCs and read depth to confirm
+that none of them are highly correlated with read depth. 
+
+```{r PC to read depth}
+n <- 6
+log_counts <- log2(gex$nCount_RNA + 1)
+par(mfrow = c(2, n/2))
+for (i in 1:n){
+    pc <- gex@reductions$pca@cell.embeddings[,i]
+    spearman_r <- cor(pc, log_counts, method = "spearman")
+    pearson_r <- cor(pc, log_counts, method = "pearson")
+    plot(pc, log_counts, cex = 0.1, col = rgb(.1, 0, 0, alpha=0.02))
+    title(sprintf("PC%.0f, r_p=%.2f, r_s=%.2f", i, pearson_r, spearman_r))
+}
+
+```
+
+
+```{r, fig.width=12, fig.height=24}
+DimHeatmap(gex, dims = 22:40, cells = 1000, 
+           ncol = 3, balanced = T)
+```
+
+
+### Choose PCs
+
+Set the dimensions to keep:
+
+```{r dims to keep}
+#### Set number of Dims to keep here ####
+keptDims <- 1:40
+########################
+nDims <- tail(keptDims, 1)
+```
+
+### GEX choose cluster resolution
+
+
+```{r run PCA}
+gex <- NormalizeData(gex)
+gex <- FindVariableFeatures(gex, selection.method = "mvp", nfeatures = 2000)
+gex <- ScaleData(gex) 
+gex <- RunPCA(gex, verbose=F)
+```
+
+#### GEX UMAP
+```{r GEX UMAP by cluster and by sample}
+
+gex <- RunUMAP(gex, dims = keptDims,
+               seed.use = 42, assay = "RNA", 
+               reduction = "pca",
+               reduction.name = "umap")
+gex <- FindNeighbors(gex, dims = keptDims)
+gex <- FindClusters(gex, resolution = 3)
+
+
+DimPlot(gex, group.by = "seurat_clusters", #cols = bms_color$seurat_clusters, 
+        reduction = "umap", label = TRUE)
+
+DimPlot(gex, group.by = "orig.ident", cols = bms_color$sample, 
+        shuffle = TRUE, reduction = "umap")
+DimPlot(gex, group.by = "subclass", label = T, shuffle = T, cols = bms_color$seurat_clusters)
+```
+
+```{r}
+dbl_clusters <- gex[[]] %>% group_by(seurat_clusters) %>%
+    dplyr::summarise(dbl_score_median = median(scDblFinder_score), n_cell = n()) %>%
+    dplyr::filter(dbl_score_median > 0.5)
+print(dbl_clusters)
+```
+
+```{r UMAP without the doublet clusters}
+`%ni%` <- Negate(`%in%`)
+DimPlot(
+    subset(gex, subset = seurat_clusters %ni% c("39","47","52")),
+    label = T, shuffle = T
+)
+```
+
+
+```{r}
+cls_num <- c("33","39","43","44","47","52")
+
+for (cls in cls_num){
+    p1 <- FeaturePlot(subset(gex, ident = cls), "scDblFinder_score")
+    print(p1)
+}
+
+RidgePlot(
+    subset(gex, subset = seurat_clusters %in% cls_num),
+    c("scDblFinder_score", "nCount_RNA")
+)
+
+cls_num <- c("39","43","44")
+FeatureScatter(
+    subset(gex, subset = seurat_clusters %in% cls_num),,
+    feature1 = "scDblFinder_score", feature2 = "nCount_RNA",
+    shuffle = T, cols = bms_color$sample,
+    log = T
+)
+```
+
+### Remove weird clusters
+
+Remove the three doublet clusters and cells in "bridge" clusters
+with high doublet scores.
+
+```{r Remove odd clusters}
+subgex <- subset(gex,
+       subset = (seurat_clusters %ni% dbl_clusters$seurat_clusters) & 
+           (seurat_clusters %ni% c("43","44") | scDblFinder_score < 0.5))
+```
+
+```{r Same UMAP after removal}
+DimPlot(subgex, label = T, shuffle = T, cols = bms_color$seurat_clusters)
+```
+
+```{r Re-UMAP after removal}
+subgex <- RunUMAP(subgex, dims = keptDims,
+               seed.use = 42, assay = "RNA", 
+               reduction = "pca",
+               reduction.name = "umap")
+subgex <- FindNeighbors(subgex, dims = keptDims)
+subgex <- FindClusters(subgex, resolution = 1)
+```
+
+```{r Visualize new UMAPs and features}
+DimPlot(subgex, label = T)
+DimPlot(subgex, group.by = "subclass", label=T)
+DimPlot(subgex, group.by = "class", label=T)
+FeaturePlot(subgex, "nCount_RNA", 
+            max.cutoff = 2500, cols = c("red", "lightgray"))
+VlnPlot(subgex, "nCount_RNA", group.by = "seurat_clusters", pt.size=0)
+VlnPlot(subgex, "class.prediction.score.max", group.by = "seurat_clusters", pt.size=0)
+FeatureScatter(subset(subgex, subset = seurat_clusters %in% c("0","1","18","22","23", "25","26","28")), 
+               "nCount_RNA", "class.prediction.score.max", log = T, shuffle = T,
+               cols = bms_color$seurat_clusters)
+```
+```{r Overwrite gex}
+gex <- subgex
+rm(subgex)
+```
+
+### More visualization
+
+```{r Number of cells per cluster, fig.width=10}
+cluster_result <- gex[[]]#["seurat_clusters"]
+cell_count <- cluster_result %>% as.data.frame() %>% 
+    dplyr::group_by(seurat_clusters, orig.ident) %>%
+    dplyr::summarise(n_cell = n())
+hist(cell_count$n_cell, breaks = seq(0,600,10))
+ggplot(data = cluster_result, aes(x=seurat_clusters, y=orig.ident)) + 
+    geom_count()
+```
+
+```{r Find clusters with different resolutions}
+gex <- FindNeighbors(gex, dims = keptDims)
+res_ls <- c(2, 1, .6, .3)
+for (res in res_ls){
+    gex <- FindClusters(gex, resolution = res, random.seed = 0)
+}
+```
+
+```{r Visualize cell counts of different resolutions, fig.width=12}
+# Resolutions to iterate over
+resolutions <- lapply(res_ls, function(x) {paste0("RNA_snn_res.", as.character(x))})
+
+# Initialize an empty list to store plots
+plots <- list()
+
+# Loop over resolutions
+for (res in resolutions) {
+  # Summarize the number of cells per cluster and sample
+  cell_counts <- gex[[]] %>% 
+    as.data.frame() %>% 
+    dplyr::group_by(!!sym(res), orig.ident) %>% 
+    dplyr::summarise(count = n(), .groups = "drop")  # Drop unnecessary grouping metadata
+  
+  # Create the plot
+  p <- ggplot(data = cell_counts, aes_string(x = res, y = "orig.ident", size = "count")) +
+    geom_point(aes(color = count), alpha = 0.8) +  
+    geom_text(aes(label = count), color = "grey10", size = 4, vjust = -0.5, show.legend = FALSE) +  # Add text labels
+    scale_size_continuous(range = c(1, 10)) +  # Adjust size scaling for points
+    scale_color_viridis_c(option = "plasma") +  
+    theme_BOR() +
+    labs(
+      title = paste("Number of Cells by Cluster and Sample, Resolution =", gsub("SCT_snn_res.", "", res)),
+      x = "Seurat Cluster",
+      y = "Sample",
+      size = "Cell Count",
+      color = "Cell Count"
+    ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),  
+      panel.grid.minor = element_blank()
+    )
+  
+  # Add plot to the list
+  plots[[res]] <- p
+}
+
+# Display all plots
+for (plot in plots) {
+  print(plot)
+}
+
+```
+
+
+```{r UMAPs with different resolutions}
+plots <- list()
+
+for (res in resolutions) {
+    # lbl <- paste0("SCT_snn_res.", as.character(res))
+    p <- DimPlot(gex, group.by = res, 
+        # cols = bms_color$seurat_clusters, 
+        reduction = "umap", label = TRUE)
+    plots[[res]] <- p
+}
+
+print(plots)
+```
+## ATAC
+
+```{r}
+proj <- proj[Cells(gex),]
+saveArchRProject(proj)
+```
+
+```{r ATAC LSI after doublet filtering}
+proj <- addIterativeLSI(ArchRProj = proj, 
+                        useMatrix = "TileMatrix", 
+                        name = "IterativeLSI", 
+                        LSIMethod = 2,
+                        force = TRUE)
+corToDepth <- proj@reducedDims@listData[["IterativeLSI"]]@listData[["corToDepth"]][["scaled"]]
+plot(corToDepth)
+```
+
+Correlation to depth are all lower than 0.5. 
+We move forward with all the LSI dimensions.
+
+```{r ATAC UMAPS}
+# UMAP without Harmony
+# Run again after filtering out the doublets
+proj <- addUMAP(proj, name = "UMAP", force = T, seed = 42)
+
+p <- plotEmbedding(proj, embedding = "UMAP")
+print(p)
+```
+
+
+```{r Clustering and impute weights}
+proj <- addClusters(input = proj, 
+                    reducedDims = "IterativeLSI", 
+                    resolution = 1,
+                    name = "Clusters",
+                    force = TRUE)
+
+proj <- addImputeWeights(proj)
+```
+
+## Share labels
+
+
+```{r GEX data-driven}
+gex$seurat_clusters <- gex$RNA_snn_res.1
+proj <- ArchR::addCellColData(proj, 
+                              data = as.vector(gex$seurat_clusters), 
+                              name = "seurat_clusters",
+                              cells = Cells(gex),
+                              force = TRUE)
+```
+
+
+```{r ATAC data-driven}
+gex <- AddMetaData(gex,
+                   as.vector(proj$Clusters),
+                   col.name = "archr_clusters")
+```
+
+
+# Transferred labels
+
+## From Allen atlas to gex
+
+### Transfer data
+
+
+```{r}
+allen <- subset(allen, subset = class_label != "Non-Neuronal")
+DefaultAssay(gex) <- "RNA"
+transfer_anchors <- FindTransferAnchors(
+    reference = allen,
+    query = gex,
+    dims = keptDims,
+    reference.reduction = "pca"
+)
+
+label.col.names <- c("subclass", "neighborhood", "class")
+prediction <- list()
+for (label.col in label.col.names) {
+    preds <- TransferData(
+        anchorset = transfer_anchors,
+        refdata = allen[[]][, paste0(label.col, "_label")]
+    )
+    preds <- preds[, c(1, ncol(preds))]
+    colnames(preds) <- c(label.col, paste0(label.col, ".prediction.score.max"))
+
+    prediction <- append(prediction, preds)
+}
+prediction <- as.data.frame(prediction)
+rownames(prediction) <- Cells(gex)
+colnames(prediction) <- lapply(colnames(prediction), function(x) paste0(x, ".2"))
+gex <- AddMetaData(gex, metadata = prediction)
+```
+
+
+
+
+### Visualization
+
+```{r Transferred label GEX UMAP}
+p <- list()
+label2plot <- c("subclass", "subclass.2", "neighborhood","neighborhood.2", "class", "class.2")
+for (label.col in label2plot) {
+    n <- nrow(unique(gex[[label.col]]))
+    p[[label.col]] <- DimPlot(gex, group.by = label.col, label = T,
+                              cols = getColorMap(cmaps_BOR$circus, 25))
+}
+p
+```
+
+
+```{r}
+FeaturePlot(gex, c("Slc17a7", "Slc17a6","Gad1", "Gad2"))
+```
+
+```{r}
+table(gex$class)
+table(gex$class.2)
+```
+
+```{r Overwrite transferred labels}
+label.col.names <- c("subclass", "neighborhood", "class")
+
+for (col in label.col.names){
+    gex[[paste0(col,".1")]] <- gex[[col]]
+    gex[[col]] <- gex[[paste0(col,".2")]]
+    gex[[paste0(col,".2")]] <- NULL
+}
+```
+
+
+```{r Cluster composition}
+
+ggplot(gex[[]], aes(x=subclass, fill=seurat_clusters)) + 
+    geom_bar(position = "fill") + coord_flip() + scale_fill_discrete(type=getColorMap(cmaps_BOR$cartoSafe, 30))
+ggplot(gex[[]], aes(fill=subclass, x=seurat_clusters)) + 
+    geom_bar(position = "fill") + coord_flip() + scale_fill_discrete(type=getColorMap(cmaps_BOR$kelly, 26))
+
+ggplot(gex[[]], aes(y=subclass, x=seurat_clusters)) + 
+    geom_bin_2d() #+ scale_fill_continuous(type = getColorMap(cmaps_BOR$sunrise, 1, "c"))
+```
+
+```{r}
+# Prepare the data with 0-count bins and ensure subclass is preserved
+heatmap_data <- gex[[]] %>% 
+  as.data.frame() %>% 
+  dplyr::group_by(seurat_clusters, subclass) %>% 
+  dplyr::summarise(count = n(), .groups = "drop") %>% 
+  # Add 0-count bins with explicit subclass and seurat_clusters levels
+  complete(
+    seurat_clusters = unique(seurat_clusters), 
+    subclass = unique(subclass),
+    fill = list(count = 0)
+  ) %>% 
+  # Normalize counts by columns (seurat_clusters)
+  group_by(seurat_clusters) %>% 
+  mutate(normalized_count = count / sum(count, na.rm = TRUE)) %>% 
+  ungroup()
+
+# Plot the heatmap
+ggplot(heatmap_data, aes(x = seurat_clusters, y = subclass, fill = normalized_count)) +
+  geom_tile(color = "grey80") +  # Add color for 0 count bins
+  geom_text(aes(label = ifelse(count > 5, count, "")), size = 2, color = "black") +  # Add numbers for counts > 5
+  scale_fill_viridis_c(option = "magma", na.value = "white") +  # Use a continuous color scale and color 0-count bins
+  coord_fixed() +  # Make bins square
+  theme_minimal() +
+  labs(
+    title = "Number of Cells by Seurat Clusters and Subclass",
+    x = "Seurat Cluster",
+    y = "Subclass",
+    fill = "Normalized Count"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+    panel.grid = element_blank()
+  )
+
+```
+
+```{r}
+heatmap_data %>%
+    dplyr::group_by(seurat_clusters) %>%
+    dplyr::slice_max(count, n = 3)
+
+heatmap_data %>%
+    dplyr::group_by(seurat_clusters) %>%
+    dplyr::slice_max(count, n = 8) %>%
+    dplyr::filter(seurat_clusters == "22")
+
+heatmap_data %>%
+    dplyr::filter(seurat_clusters %in% c("19", "22")) %>%
+    dplyr::group_by(subclass) %>%
+    dplyr::summarise(count = sum(count)) %>%
+    dplyr::arrange(desc(count))
+```
+
+
+```{r}
+DimPlot(gex, group.by = "subclass", cols = bms_color$seurat_clusters, label = T, shuffle = T) + NoLegend()
+DimPlot(gex, cols = bms_color$seurat_clusters, label = T, shuffle = T)
+```
+
+## From gex to atac
+
+```{r }
+# # names of the labels to transfer
+# label.col.names <- c("subclass", "neighborhood.2", "class.2")
+# cluster.anno <- gex@meta.data[label.col.names]
+# 
+# # Add labels
+# for (label.col.name in label.col.names){
+#     proj <- addCellColData(proj, data = cluster.anno[[label.col.name]],
+#                            cells = rownames(cluster.anno), name = label.col.name, force = TRUE)
+# }
+```
+
+```{r ATAC UMAP}
+markerGenes <- c("Rbfox3", "Snap25", "Slc17a7", "Gad1")
+plotEmbedding(ArchRProj = proj, colorBy = "cellColData", name = "seurat_clusters", embedding = "UMAP")
+```
+
+# Save the project
+
+```{r}
+saveRDS(gex, gex.obj.path)
+ArchR::saveArchRProject(proj, archr.proj.path)
+```
+
+# Session info
+
+```{r sinfo, cache = FALSE}
+sessionInfo()
+```

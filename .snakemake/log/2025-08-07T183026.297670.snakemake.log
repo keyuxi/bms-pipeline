@@ -1,0 +1,88 @@
+Assuming unrestricted shared filesystem usage.
+None
+host: DN52eml1.SUNet
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 8
+Rules claiming more threads will be scaled down.
+Conda environments: ignored
+Job stats:
+job                 count
+----------------  -------
+all                     1
+atac_per_cell_qc        1
+total                   2
+
+Select jobs to execute...
+Execute 1 jobs...
+[Thu Aug  7 18:30:26 2025]
+localrule atac_per_cell_qc:
+    input: /Users/kyx/workspace/bms_analysis/Data/Arrow/YK01_En7Apos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK02_En7Bneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK04_En7Cneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK05_En7Cpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK06_En7ReAneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK07_En7ReApos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK08_En7ReBpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK09_En28Apos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK10_En28Cneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK12_En28Dneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK13_En28Dpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK14_En28ReBneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK15_En28ReBpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK16_En28ReCneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK17_En28ReCpos.arrow, config/samples.csv
+    output: results/atac/single_qc/ArchRProject/BMS_clean, results/atac/single_qc/atac_qc.tsv, results/atac/single_qc/ATAC_per_cell_QC.pdf, results/atac/single_qc/doublet_scores.rds
+    jobid: 1
+    reason: Missing output files: results/atac/single_qc/ArchRProject/BMS_clean
+    resources: tmpdir=/var/folders/zh/6fmmt96j7f30q2xr1cdwmjgh0000gr/T
+RuleException:
+CalledProcessError in file "/Users/kyx/workspace/bms-pipeline/workflow/Snakefile", line 44:
+Command 'set -euo pipefail;  
+        Rscript scripts/atac/atac_per_cell.R \
+          --arrow_dir /Users/kyx/workspace/bms_analysis/Data/Arrow \
+          --samples config/samples.csv \
+          --out_proj results/atac/single_qc/ArchRProject/BMS_clean \
+          --out_qc results/atac/single_qc/atac_qc.tsv \
+          --out_fig results/atac/single_qc/ATAC_per_cell_QC.pdf \
+          --threads 16 \
+          --min_tss 5 \
+          --min_log10_nfrags 3.5 \
+          --max_blacklist 0.05 \
+          --copy_arrows TRUE
+          --doublet_rds results/atac/single_qc/doublet_scores.rds' returned non-zero exit status 2.
+[Thu Aug  7 18:30:26 2025]
+Error in rule atac_per_cell_qc:
+    message: None
+    jobid: 1
+    input: /Users/kyx/workspace/bms_analysis/Data/Arrow/YK01_En7Apos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK02_En7Bneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK04_En7Cneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK05_En7Cpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK06_En7ReAneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK07_En7ReApos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK08_En7ReBpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK09_En28Apos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK10_En28Cneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK12_En28Dneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK13_En28Dpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK14_En28ReBneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK15_En28ReBpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK16_En28ReCneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK17_En28ReCpos.arrow, config/samples.csv
+    output: results/atac/single_qc/ArchRProject/BMS_clean, results/atac/single_qc/atac_qc.tsv, results/atac/single_qc/ATAC_per_cell_QC.pdf, results/atac/single_qc/doublet_scores.rds
+    shell:
+        
+        Rscript scripts/atac/atac_per_cell.R \
+          --arrow_dir /Users/kyx/workspace/bms_analysis/Data/Arrow \
+          --samples config/samples.csv \
+          --out_proj results/atac/single_qc/ArchRProject/BMS_clean \
+          --out_qc results/atac/single_qc/atac_qc.tsv \
+          --out_fig results/atac/single_qc/ATAC_per_cell_QC.pdf \
+          --threads 16 \
+          --min_tss 5 \
+          --min_log10_nfrags 3.5 \
+          --max_blacklist 0.05 \
+          --copy_arrows TRUE
+          --doublet_rds results/atac/single_qc/doublet_scores.rds 
+        
+        (command exited with non-zero exit code)
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look below for error messages
+[Thu Aug  7 18:30:26 2025]
+Error in rule atac_per_cell_qc:
+    message: None
+    jobid: 1
+    input: /Users/kyx/workspace/bms_analysis/Data/Arrow/YK01_En7Apos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK02_En7Bneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK04_En7Cneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK05_En7Cpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK06_En7ReAneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK07_En7ReApos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK08_En7ReBpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK09_En28Apos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK10_En28Cneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK12_En28Dneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK13_En28Dpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK14_En28ReBneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK15_En28ReBpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK16_En28ReCneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK17_En28ReCpos.arrow, config/samples.csv
+    output: results/atac/single_qc/ArchRProject/BMS_clean, results/atac/single_qc/atac_qc.tsv, results/atac/single_qc/ATAC_per_cell_QC.pdf, results/atac/single_qc/doublet_scores.rds
+    shell:
+        
+        Rscript scripts/atac/atac_per_cell.R \
+          --arrow_dir /Users/kyx/workspace/bms_analysis/Data/Arrow \
+          --samples config/samples.csv \
+          --out_proj results/atac/single_qc/ArchRProject/BMS_clean \
+          --out_qc results/atac/single_qc/atac_qc.tsv \
+          --out_fig results/atac/single_qc/ATAC_per_cell_QC.pdf \
+          --threads 16 \
+          --min_tss 5 \
+          --min_log10_nfrags 3.5 \
+          --max_blacklist 0.05 \
+          --copy_arrows TRUE
+          --doublet_rds results/atac/single_qc/doublet_scores.rds 
+        
+        (command exited with non-zero exit code)
+Complete log(s): /Users/kyx/workspace/bms-pipeline/.snakemake/log/2025-08-07T183026.297670.snakemake.log
+WorkflowError:
+At least one job did not complete successfully.

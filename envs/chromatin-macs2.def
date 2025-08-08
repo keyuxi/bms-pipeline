@@ -1,0 +1,32 @@
+Bootstrap: localimage
+From: /home/kyx/bms_analysis/Envs/chromatin-basic.sif
+
+%post
+    sudo apt -y update
+    sudo apt -y install build-essential zlib1g-dev \
+        libncurses5-dev libgdbm-dev libnss3-dev \
+        libssl-dev libreadline-dev libffi-dev curl
+    wget https://www.python.org/ftp/python/3.9.15/Python-3.9.15.tar.xz
+    tar -xf Python-3.9.15.tar.xz
+    cd Python-3.9.15
+    ./configure
+    sudo make install
+    python3 --version
+
+    sudo apt-get install -y python3-dev
+
+    curl https://bootstrap.pypa.io/pip/get-pip.py --output get-pip.py
+    sudo python3 get-pip.py
+
+    pip3 install numpy
+
+    # wget https://github.com/macs3-project/MACS/archive/refs/tags/v2.2.7.1.tar.gz
+    # tar -xf v2.2.7.1.tar.gz
+    # cd MACS-2.2.7.1
+    # # !!! DANGEROUS BUG FIX FOR PYTHON >0 3.10 !!!
+    # sed -i "s/float(sys\.version\[:3\])<3\.6/sys\.version_info<(3,6)/" setup.py
+    # grep "version" setup.py
+
+    # python3 setup.py install
+
+    pip3 install MACS2

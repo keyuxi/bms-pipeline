@@ -1,0 +1,179 @@
+###############################################################################
+# bms-pipeline / Snakefile  — minimal, from Arrow+10x to pc_df_atac.csv
+###############################################################################
+
+configfile: "config/params.yaml"
+
+SAMPLE_TABLE = "config/samples.csv"
+SAMPLES = [l.split(',')[0] for l in open(SAMPLE_TABLE).read().strip().split('\n')[1:]]
+
+ARROW_DIR        = config["arrow_dir"]     
+RESULTS          = config.get("output_dir","results")
+BIO_SCHEMES      = config.get("bio_schemes", ["cell_type","cell_cluster"])
+
+# ------------------------------------------------------------------
+# Top-level targets: PCs for each biological grouping scheme
+# ------------------------------------------------------------------
+rule all:
+    input:
+        f"{RESULTS}/atac/single_qc/ArchRProject/BMS_clean"
+        # expand(f"{RESULTS}/atac/pcs/{{scheme}}/pc_df_atac.csv", scheme=BIO_SCHEMES)
+
+# ------------------------------------------------------------------
+# ATAC per-cell QC (reads existing Arrows; no Arrow rebuild)
+# ------------------------------------------------------------------
+rule atac_per_cell_qc:
+    input:
+        arrows = expand(f"{ARROW_DIR}" + "/{sample}.arrow", sample=SAMPLES),
+        samples = SAMPLE_TABLE
+    output:
+        proj = directory(f"{RESULTS}/atac/single_qc/ArchRProject/BMS_clean"),
+        qc   = f"{RESULTS}/atac/single_qc/atac_qc.tsv",
+        fig  = f"{RESULTS}/atac/single_qc/ATAC_per_cell_QC.pdf"
+    params:
+        genome  = config.get("genome", "mm10"),
+        min_tss = config.get("min_tss", 5),
+        min_log10_nfrags = config.get("min_log10_nfrags", 3.5),
+        max_black = config.get("max_blacklist_ratio", 0.05),
+        copy_arrows = "TRUE" if config.get("copy_arrows", False) else "FALSE",
+        arrow_dir = ARROW_DIR
+    singularity: config.get("r_singularity","")
+    shell:
+        r"""
+        Rscript workflow/scripts/atac/atac_per_cell.R \
+          --arrow_dir {params.arrow_dir} \
+          --samples {input.samples} \
+          --out_proj {output.proj} \
+          --out_qc {output.qc} \
+          --out_fig {output.fig} \
+          --min_tss {params.min_tss} \
+          --min_log10_nfrags {params.min_log10_nfrags} \
+          --max_blacklist {params.max_black} \
+          --copy_arrows {params.copy_arrows}
+        """
+
+# ------------------------------------------------------------------
+# GEX per-cell QC (placeholder)
+# ------------------------------------------------------------------
+rule gex_per_cell_qc:
+    input:
+        samples = SAMPLE_TABLE
+    output:
+        qc = f"{RESULTS}/gex/single_qc/gex_qc.tsv"
+    singularity: config.get("r_singularity","")
+    shell:
+        r"""
+        Rscript -e "rmarkdown::render('scripts/gex/gex_per_cell.Rmd', \
+          output_file = '{output.qc}.html')"
+        """
+
+# ------------------------------------------------------------------
+# Joint QC / filtering and labels (no peaks yet)
+# ------------------------------------------------------------------
+rule joint_per_cell_filter:
+    input:
+        atac_qc = rules.atac_per_cell_qc.output.qc,
+        gex_qc  = rules.gex_per_cell_qc.output.qc
+    output:
+        filt = f"{RESULTS}/joint/cell_filters.tsv"
+    singularity: config.get("r_singularity","")
+    shell:
+        r"""
+        Rscript -e "rmarkdown::render('scripts/joint/joint_per_cell_filtering.Rmd', \
+          output_file = '{output.filt}.html')"
+        """
+
+rule dataset_annotation:
+    input:
+        filt = rules.joint_per_cell_filter.output.filt
+    output:
+        ann = f"{RESULTS}/joint/dataset_annotation.tsv"
+    singularity: config.get("r_singularity","")
+    shell:
+        r"""
+        Rscript -e "rmarkdown::render('scripts/joint/dataset_annotation.Rmd', \
+          output_file = '{output.ann}.html')"
+        """
+
+rule cell_type_labels:
+    input:
+        ann = rules.dataset_annotation.output.ann
+    output:
+        labels = f"{RESULTS}/joint/cell_type_labels.tsv"
+    singularity: config.get("r_singularity","")
+    shell:
+        r"""
+        Rscript -e "rmarkdown::render('scripts/joint/cell_type_labels.Rmd', \
+          output_file = '{output.labels}.html')"
+        """
+
+# ------------------------------------------------------------------
+# Peak calling (sample-aware pseudobulks inside the script)
+# Produces a BED used for quantification
+# ------------------------------------------------------------------
+rule peak_calling:
+    input:
+        arrows = expand(f"{ARROW_DIR}" + "/{sample}.arrow", sample=SAMPLES),
+        labels = rules.cell_type_labels.output.labels,
+        filt   = rules.joint_per_cell_filter.output.filt
+    output:
+        bed = f"{RESULTS}/atac/peaks/{BIO_SCHEMES}/peaks.bed"
+    params:
+        macs2 = config["macs2_path"],
+        repro = config.get("reproducibility", 2),
+        min_cells  = config.get("min_cells_per_group",20),
+        min_rep    = config.get("min_replicates",2)
+    singularity: config.get("r_singularity","")
+    shell:
+        r"""
+        Rscript scripts/atac/peak_calling.R \
+          --arrow_dir {ARROW_DIR} \
+          --samples {SAMPLE_TABLE} \
+          --group_by {PEAK_GROUP_BY} \
+          --macs2 {params.macs2} \
+          --reproducibility {params.repro} \
+          --min_cells {params.min_cells} \
+          --min_rep {params.min_rep} \
+          --out_bed {output.bed}
+        """
+
+# ------------------------------------------------------------------
+# Biological pseudobulks & quantification
+# Run once per scheme: scheme ∈ {"cell_type","cell_cluster"}
+# Script should write the MTX path below
+# ------------------------------------------------------------------
+rule bio_pseudobulks_matrix:
+    input:
+        bed    = rules.peak_calling.output.bed,
+        labels = rules.cell_type_labels.output.labels,
+        filt   = rules.joint_per_cell_filter.output.filt
+    output:
+        mtx = temp(f"{RESULTS}/atac/matrices/{{scheme}}/peak_counts.mtx")
+    singularity: config.get("r_singularity","")
+    shell:
+        r"""
+        Rscript -e "rmarkdown::render('scripts/joint/bio_pseudobulks.Rmd', \
+          output_file = '{output.mtx}.html', \
+          params = list(group_by = '{wildcards.scheme}', \
+                        bed = '{input.bed}', \
+                        arrow_dir = '{ARROW_DIR}', \
+                        samples = '{SAMPLE_TABLE}'))"
+        """
+
+# ------------------------------------------------------------------
+# PCs
+# ------------------------------------------------------------------
+rule compute_pcs:
+    input:
+        mtx = rules.bio_pseudobulks_matrix.output.mtx
+    output:
+        pcs = f"{RESULTS}/atac/pcs/{{scheme}}/pc_df_atac.csv"
+    conda: "envs/sklearn.yaml"
+    shell:
+        """
+        python scripts/atac/compute_pcs.py \
+          --matrix {input.mtx} \
+          --skip_k {config[skip_k_pcs]} \
+          --n_pc {config[n_top_pcs]} \
+          --out {output.pcs}
+        """

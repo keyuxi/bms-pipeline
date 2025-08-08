@@ -1,0 +1,194 @@
+---
+title: "BMS"
+author: "Yuxi Ke"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    theme: "flatly"
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: show
+---
+
+# Overview
+
+Export ArchR fragments
+
+Input:
+
+    - An ArchR project after cell type annotation
+    - A sample metadata csv file
+    
+Yuxi Ke, 07/31/2025
+
+# Setup
+
+```{r setup, include = FALSE, warning = FALSE, message=FALSE, echo=FALSE}
+project_id <- "bms" # determines the name of the cache folder
+doc_id     <- file.path("03-3c_export_fragments/") # determines name of the subfolder of `figures` where pngs/pdfs are saved
+dataout    <- file.path(here::here("Output/"), doc_id); dir.create(dataout, recursive = TRUE)
+figout     <- file.path(here::here("Fig/"), doc_id); dir.create(figout, recursive = TRUE)
+
+bp_outdir <- here::here("Data", "BPCells")
+if (!dir.exists(bp_outdir)) {
+  dir.create(bp_outdir, recursive = TRUE)
+}
+
+here::i_am(".gitignore")
+knitr::opts_chunk$set(message = TRUE,
+                      warning = FALSE,
+                      error = FALSE,
+                      cache = FALSE,
+                      fig.path = figout,
+                      fig.keep = "all",
+                      dev = c("png", "pdf"),
+                      cache.lazy = FALSE)
+
+grDevices::pdf.options(useDingbats = FALSE)
+options(knitr.table.format = "html") 
+```
+
+```{r Libraries, class.source="fold-hide", warning = FALSE, message = FALSE}
+library(here)
+library(dplyr)
+library(tidyr)
+
+library(ArchR)
+library(BPCells)
+library(GenomicRanges)
+
+reload <- function() {
+    devtools::load_all("~/workspace/bms")
+}
+
+redoc <- function() {
+    devtools::document("~/workspace/bms")
+}
+
+reload()
+bms::setup_archr(); bms::set_theme()
+set.seed(100)
+```
+***
+
+# Load data
+
+```{r Define file names and read data, include=FALSE}
+location <- "local" # {"local", "sherlock"}
+
+if (location == "local") {
+    archr.proj.path <- here::here("Data/ArchRProjects/BMS_diff")
+    bp_dir <- here::here("Data/BPCells")
+} else {
+    oak.path <- "/oak/stanford/groups/wjg/kyx/data/bms"
+    archr.proj.path <- file.path(oak.path, "archr/BMS_diff")
+}
+
+proj <- loadArchRProject(archr.proj.path, showLogo = FALSE)
+```
+
+# Get fragments
+
+```{r}
+frags <- getFragmentsFromProject(proj)
+```
+# Save fragments
+```{r Save individual fragments files}
+# Define autosomes for mm10
+autosomes <- paste0("chr", 1:19)
+
+all_frags_list <- lapply(frags, function(gr) {
+  gr$cell_id <- decode(gr$RG)
+  gr$RG <- NULL
+  gr <- keepSeqlevels(gr, autosomes, pruning.mode = "coarse")
+  gr <- BPCells::convert_to_fragments(gr)
+  return(gr)
+})
+
+# Write each fragments object to a separate .bpfrags file
+# for (sample_name in names(all_frags_list)) {
+#   message("Saving: ", sample_name)
+#   
+#   frag <- all_frags_list[[sample_name]]
+# 
+#   write_fragments_dir(frag, file.path(bp_outdir, paste0(sample_name, ".bpfrags")))
+# }
+```
+
+# Add metadata
+```{r Merge and subset}
+# Merge samples
+frags_all <- Reduce(c, all_frags_list)
+write_fragments_dir(frags_all, file.path(bp_dir, "ATAC_merged.bpfrags"), overwrite = TRUE)
+
+# Subset to match ArchR
+cell_metadata <- getCellColData(proj) %>%
+    as.data.frame() %>%
+    dplyr::select(c("nFrags", "TSSEnrichment",  
+                    "cell_type", "cell_class",
+                    "Sample", "Condition", "Group", "Gating", "Recall", "Time")) %>%
+    tibble::rownames_to_column("cell_names")
+
+frags <- select_cells(frags_all, cell_metadata$cell_names)
+stopifnot(all(cell_metadata$cell_names == cellNames(frags)))
+
+write_fragments_dir(frags, file.path(bp_dir, "BMS_diff.bpfrags"), overwrite = TRUE)
+```
+
+
+```{r Format cell metadata}
+cell_metadata <- bms::relevel_condition_col(cell_metadata)
+cell_metadata$Time <- factor(cell_metadata$Time,
+                  levels = c("7d", "28d"),
+                  labels = c("d07", "d28"))
+cell_metadata$Recall <- factor(cell_metadata$Recall,
+                  levels = c(FALSE, TRUE),
+                  labels = c("N", "R"))
+cell_metadata <- cell_metadata %>%
+    as.data.frame() %>%
+    dplyr::mutate(RecallGating = paste(Recall, Gating, sep="+"),
+                  TimeGating = paste(Time, Gating, sep="+")) %>%
+    dplyr::mutate(cell_class = ifelse(cell_type %in% c("CGE", "MGE"),
+                          "GABAergic",
+                          "Glutamatergic"))
+```
+
+
+```{r Format transcript data for annotation}
+transcripts <- BPCells::read_gtf(here::here("Output/03-8_track_export/genes_mm10_trackplot.gtf"),
+                                 attributes = c("gene_id", "symbol", "transcript_id"),
+                                 features = c("exon", "transcript"))
+transcripts$gene_name <- transcripts$symbol
+transcripts$symbol <- NULL
+
+transcripts_clean <- transcripts %>%                    # tibble you showed
+  filter(!is.na(gene_name)) %>%                         # remove NA names
+  filter(feature %in% c("gene", "transcript")) %>%      # no need for exons
+  group_by(gene_id) %>%                                 # keep one record /
+  slice_head(n = 1) %>%                                 #   per gene
+  ungroup()
+
+transcripts_gr <- makeGRangesFromDataFrame(
+  transcripts_clean,
+  keep.extra.columns = TRUE,
+  seqnames.field     = "chr",
+  start.field        = "start",
+  end.field          = "end",
+  strand.field       = "strand"
+)
+```
+
+# Save BP object
+
+```{r Save BP object}
+bp <- list()
+bp$frag <- frags
+bp$cell_metadata <- cell_metadata
+bp$transcripts <- transcripts_gr
+saveRDS(bp, file.path(bp_dir, "bp_obj.rds"))
+```
+
+
+

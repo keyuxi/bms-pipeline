@@ -1,0 +1,57 @@
+# config/params.yaml
+# Global parameters for BMS ATAC Snakemake pipeline
+# Modify here to control all key steps
+
+# General
+project_name: "bms"
+genome: "mm10"
+
+# Arrow
+arrow_dir: "/Users/kyx/workspace/bms_analysis/Data/Arrow" # Local
+# arrow_dir: "/oak/stanford/groups/wjg/kyx/data/bms/arrow" # Sherlock
+use_singularity_for_R: false
+output_dir: "results"
+
+# biological pseudobulk schemes (for biological pseudobulks)
+bio_schemes: ["cell_type", "cell_cluster"]
+
+# ATAC per-cell QC (ArchR project creation)
+min_tss: 5                           # TSSEnrichment threshold
+min_log10_nfrags: 3.5                # nFrags >= 10^3.5
+max_blacklist_ratio: 0.05            # fraction of reads in blacklist
+copy_arrows: true
+
+# PCA block
+n_top_pcs: 18
+skip_k_pcs: 2
+
+macs2_path: "/path/to/macs2"
+reproducibility: 2
+min_cells_per_group: 20
+min_replicates: 2
+
+# Pseudobulk aggregation (for peak calling)
+group_by: "celltype_sample"         # or "cell_type" for legacy
+min_cells_per_group: 20
+max_cells_per_group: 300
+min_replicates: 13
+max_replicates: 16
+
+# Peak calling (MACS2 via ArchR)
+macs2_path: "/Users/kyx/software/miniconda/envs/bms/bin/macs2" 
+reproducibility: 2                  # ArchR: 1 = lenient, 2 = replicate-supported
+
+# Peak filtering (variance + knee)
+min_count_threshold: 8
+min_sample_fraction: 0.2
+min_sample_count: 2
+scran_bio_threshold: 5
+scran_fdr_threshold: 0.01
+top_n_peaks_knee: 10000              # manually chosen from bio/tech variance knee
+
+# ATAC blacklist & genome
+blacklist_bed: "config/genome/mm10-blacklist.bed"
+gtf: "config/genome/gencode.vM31.gtf"
+
+# Output
+output_dir: "results"
