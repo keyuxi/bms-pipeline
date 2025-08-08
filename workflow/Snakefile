@@ -16,7 +16,9 @@ BIO_SCHEMES      = config.get("bio_schemes", ["cell_type","cell_cluster"])
 # ------------------------------------------------------------------
 rule all:
     input:
-        f"{RESULTS}/atac/single_qc/ArchRProject/BMS_clean"
+        f"{RESULTS}/joint/cell_filters.tsv"
+        # f"{RESULTS}/gex/merged/gex_merged.rds",
+        # f"{RESULTS}/atac/single_qc/ArchRProject/BMS_clean"
         # expand(f"{RESULTS}/atac/pcs/{{scheme}}/pc_df_atac.csv", scheme=BIO_SCHEMES)
 
 # ------------------------------------------------------------------
@@ -53,18 +55,28 @@ rule atac_per_cell_qc:
         """
 
 # ------------------------------------------------------------------
-# GEX per-cell QC (placeholder)
+# GEX per-cell QC
 # ------------------------------------------------------------------
 rule gex_per_cell_qc:
     input:
-        samples = SAMPLE_TABLE
+        samples = SAMPLE_TABLE,
     output:
-        qc = f"{RESULTS}/gex/single_qc/gex_qc.tsv"
+        rds = f"{RESULTS}/gex/merged/gex_merged.rds",
+        qc  = f"{RESULTS}/gex/single_qc/gex_qc.tsv",
+        fig = f"{RESULTS}/gex/single_qc/GEX_per_cell_QC.pdf"
+    params:
+        allen = config["allen_reference_rds"],
+        aligned_dir = config["aligned_dir"]
     singularity: config.get("r_singularity","")
     shell:
         r"""
-        Rscript -e "rmarkdown::render('scripts/gex/gex_per_cell.Rmd', \
-          output_file = '{output.qc}.html')"
+        Rscript workflow/scripts/gex/gex_per_cell.R \
+          --samples_csv {input.samples} \
+          --aligned_dir {params.aligned_dir} \
+          --allen_ref {params.allen} \
+          --out_rds {output.rds} \
+          --out_qc {output.qc} \
+          --out_fig {output.fig}
         """
 
 # ------------------------------------------------------------------
@@ -76,12 +88,24 @@ rule joint_per_cell_filter:
         gex_qc  = rules.gex_per_cell_qc.output.qc
     output:
         filt = f"{RESULTS}/joint/cell_filters.tsv"
+    params:
+        gex_fix_second_underscore = str(config.get("gex_fix_second_underscore", True)).upper(),  # "TRUE"/"FALSE"
+        drop_gex_doublets         = str(config.get("drop_gex_doublets", False)).upper(),
+        gex_doublet_col           = config.get("gex_doublet_col", "scDblFinder_class"),
+        gex_doublet_label         = config.get("gex_doublet_label", "doublet")
     singularity: config.get("r_singularity","")
     shell:
         r"""
-        Rscript -e "rmarkdown::render('scripts/joint/joint_per_cell_filtering.Rmd', \
-          output_file = '{output.filt}.html')"
+        Rscript workflow/scripts/joint/joint_per_cell_filtering.R \
+          --atac_qc {input.atac_qc} \
+          --gex_qc {input.gex_qc} \
+          --out_tsv {output.filt} \
+          --gex_fix_second_underscore {params.gex_fix_second_underscore} \
+          --drop_gex_doublets {params.drop_gex_doublets} \
+          --gex_doublet_col {params.gex_doublet_col} \
+          --gex_doublet_label {params.gex_doublet_label}
         """
+
 
 rule dataset_annotation:
     input:

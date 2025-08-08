@@ -21,6 +21,25 @@ min_log10_nfrags: 3.5                # nFrags >= 10^3.5
 max_blacklist_ratio: 0.05            # fraction of reads in blacklist
 copy_arrows: true
 
+# GEX per-cell QC
+allen_reference_rds: "/Users/kyx/workspace/bms_analysis/Data/SeuratObjects/Allen_PFC_1in20_02-1.rds"
+aligned_dir: "/Users/kyx/workspace/bms_analysis/Data/mm10_aligned_subset/"
+# (optional) tweakables
+gex_min_features: 500
+gex_max_features: 7500
+gex_min_counts: 1000
+gex_max_counts: 80000
+gex_max_percent_mt: 5
+gex_anchor_dims: 40
+gex_umap_dims: 30
+gex_cluster_res: 5.0
+
+# Joint per-cell filter behavior
+gex_fix_second_underscore: true   # make GEX cell IDs match ArchR (Sample#barcode)
+drop_gex_doublets: true         # set true if you want to exclude predicted doublets here
+gex_doublet_col: "scDblFinder_class"
+gex_doublet_label: "doublet"
+
 # PCA block
 n_top_pcs: 18
 skip_k_pcs: 2
