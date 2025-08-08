@@ -1,0 +1,73 @@
+Assuming unrestricted shared filesystem usage.
+None
+host: DN52eml1.SUNet
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 14
+Rules claiming more threads will be scaled down.
+Conda environments: ignored
+Job stats:
+job                count
+---------------  -------
+all                    1
+gex_per_cell_qc        1
+total                  2
+
+Select jobs to execute...
+Execute 1 jobs...
+[Fri Aug  8 13:56:02 2025]
+localrule gex_per_cell_qc:
+    input: config/samples.csv
+    output: results/gex/merged/gex_tagged.rds, results/gex/single_qc/gex_qc.tsv, results/gex/single_qc/GEX_per_cell_QC.pdf
+    jobid: 1
+    reason: Missing output files: results/gex/merged/gex_tagged.rds
+    resources: tmpdir=/var/folders/zh/6fmmt96j7f30q2xr1cdwmjgh0000gr/T
+RuleException:
+CalledProcessError in file "/Users/kyx/workspace/bms-pipeline/workflow/Snakefile", line 72:
+Command 'set -euo pipefail;  
+        Rscript workflow/scripts/gex/gex_per_cell.R \
+          --samples_csv config/samples.csv \
+          --aligned_dir /Users/kyx/workspace/bms_analysis/Data/mm10_aligned_subset/ \
+          --allen_ref /Users/kyx/workspace/bms_analysis/Data/SeuratObjects/Allen_PFC_1in20_02-1.rds \
+          --out_rds results/gex/merged/gex_tagged.rds \
+          --out_qc results/gex/single_qc/gex_qc.tsv \
+          --out_fig results/gex/single_qc/GEX_per_cell_QC.pdf' returned non-zero exit status 1.
+[Fri Aug  8 14:11:47 2025]
+Error in rule gex_per_cell_qc:
+    message: None
+    jobid: 1
+    input: config/samples.csv
+    output: results/gex/merged/gex_tagged.rds, results/gex/single_qc/gex_qc.tsv, results/gex/single_qc/GEX_per_cell_QC.pdf
+    shell:
+        
+        Rscript workflow/scripts/gex/gex_per_cell.R \
+          --samples_csv config/samples.csv \
+          --aligned_dir /Users/kyx/workspace/bms_analysis/Data/mm10_aligned_subset/ \
+          --allen_ref /Users/kyx/workspace/bms_analysis/Data/SeuratObjects/Allen_PFC_1in20_02-1.rds \
+          --out_rds results/gex/merged/gex_tagged.rds \
+          --out_qc results/gex/single_qc/gex_qc.tsv \
+          --out_fig results/gex/single_qc/GEX_per_cell_QC.pdf
+        
+        (command exited with non-zero exit code)
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look below for error messages
+[Fri Aug  8 14:11:48 2025]
+Error in rule gex_per_cell_qc:
+    message: None
+    jobid: 1
+    input: config/samples.csv
+    output: results/gex/merged/gex_tagged.rds, results/gex/single_qc/gex_qc.tsv, results/gex/single_qc/GEX_per_cell_QC.pdf
+    shell:
+        
+        Rscript workflow/scripts/gex/gex_per_cell.R \
+          --samples_csv config/samples.csv \
+          --aligned_dir /Users/kyx/workspace/bms_analysis/Data/mm10_aligned_subset/ \
+          --allen_ref /Users/kyx/workspace/bms_analysis/Data/SeuratObjects/Allen_PFC_1in20_02-1.rds \
+          --out_rds results/gex/merged/gex_tagged.rds \
+          --out_qc results/gex/single_qc/gex_qc.tsv \
+          --out_fig results/gex/single_qc/GEX_per_cell_QC.pdf
+        
+        (command exited with non-zero exit code)
+Complete log(s): /Users/kyx/workspace/bms-pipeline/.snakemake/log/2025-08-08T135602.842154.snakemake.log
+WorkflowError:
+At least one job did not complete successfully.

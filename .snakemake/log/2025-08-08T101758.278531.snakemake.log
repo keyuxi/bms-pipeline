@@ -1,0 +1,89 @@
+Assuming unrestricted shared filesystem usage.
+None
+host: DN52eml1.SUNet
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 14
+Rules claiming more threads will be scaled down.
+Conda environments: ignored
+Job stats:
+job                      count
+---------------------  -------
+all                          1
+atac_per_cell_qc             1
+joint_per_cell_filter        1
+total                        3
+
+Select jobs to execute...
+Execute 1 jobs...
+[Fri Aug  8 10:17:58 2025]
+localrule atac_per_cell_qc:
+    input: /Users/kyx/workspace/bms_analysis/Data/Arrow/YK01_En7Apos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK02_En7Bneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK04_En7Cneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK05_En7Cpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK06_En7ReAneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK07_En7ReApos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK08_En7ReBpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK09_En28Apos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK10_En28Cneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK12_En28Dneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK13_En28Dpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK14_En28ReBneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK15_En28ReBpos.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK16_En28ReCneg.arrow, /Users/kyx/workspace/bms_analysis/Data/Arrow/YK17_En28ReCpos.arrow, config/samples.csv
+    output: results/atac/single_qc/ArchRProject/BMS_clean, results/atac/single_qc/atac_qc.tsv, results/atac/single_qc/ATAC_per_cell_QC.pdf
+    jobid: 2
+    reason: Code has changed since last execution; Params have changed since last execution: Union of exclusive params before and now across all output: before: 12 now: <nothing exclusive> 
+    resources: tmpdir=/var/folders/zh/6fmmt96j7f30q2xr1cdwmjgh0000gr/T
+[Fri Aug  8 10:19:14 2025]
+Finished jobid: 2 (Rule: atac_per_cell_qc)
+1 of 3 steps (33%) done
+Select jobs to execute...
+Execute 1 jobs...
+[Fri Aug  8 10:19:14 2025]
+localrule joint_per_cell_filter:
+    input: results/atac/single_qc/atac_qc.tsv, results/gex/single_qc/gex_qc.tsv
+    output: results/joint/cell_filters.tsv
+    jobid: 1
+    reason: Missing output files: results/joint/cell_filters.tsv; Input files updated by another job: results/atac/single_qc/atac_qc.tsv
+    resources: tmpdir=/var/folders/zh/6fmmt96j7f30q2xr1cdwmjgh0000gr/T
+RuleException:
+CalledProcessError in file "/Users/kyx/workspace/bms-pipeline/workflow/Snakefile", line 98:
+Command 'set -euo pipefail;  
+        Rscript workflow/scripts/joint/joint_per_cell_filtering.R \
+          --atac_qc results/atac/single_qc/atac_qc.tsv \
+          --gex_qc results/gex/single_qc/gex_qc.tsv \
+          --out_tsv results/joint/cell_filters.tsv \
+          --gex_fix_second_underscore TRUE \
+          --drop_gex_doublets TRUE \
+          --gex_doublet_col scDblFinder_class \
+          --gex_doublet_label doublet' returned non-zero exit status 1.
+[Fri Aug  8 10:19:14 2025]
+Error in rule joint_per_cell_filter:
+    message: None
+    jobid: 1
+    input: results/atac/single_qc/atac_qc.tsv, results/gex/single_qc/gex_qc.tsv
+    output: results/joint/cell_filters.tsv
+    shell:
+        
+        Rscript workflow/scripts/joint/joint_per_cell_filtering.R \
+          --atac_qc results/atac/single_qc/atac_qc.tsv \
+          --gex_qc results/gex/single_qc/gex_qc.tsv \
+          --out_tsv results/joint/cell_filters.tsv \
+          --gex_fix_second_underscore TRUE \
+          --drop_gex_doublets TRUE \
+          --gex_doublet_col scDblFinder_class \
+          --gex_doublet_label doublet
+        
+        (command exited with non-zero exit code)
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look below for error messages
+[Fri Aug  8 10:19:14 2025]
+Error in rule joint_per_cell_filter:
+    message: None
+    jobid: 1
+    input: results/atac/single_qc/atac_qc.tsv, results/gex/single_qc/gex_qc.tsv
+    output: results/joint/cell_filters.tsv
+    shell:
+        
+        Rscript workflow/scripts/joint/joint_per_cell_filtering.R \
+          --atac_qc results/atac/single_qc/atac_qc.tsv \
+          --gex_qc results/gex/single_qc/gex_qc.tsv \
+          --out_tsv results/joint/cell_filters.tsv \
+          --gex_fix_second_underscore TRUE \
+          --drop_gex_doublets TRUE \
+          --gex_doublet_col scDblFinder_class \
+          --gex_doublet_label doublet
+        
+        (command exited with non-zero exit code)
+Complete log(s): /Users/kyx/workspace/bms-pipeline/.snakemake/log/2025-08-08T101758.278531.snakemake.log
+WorkflowError:
+At least one job did not complete successfully.

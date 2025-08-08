@@ -16,9 +16,6 @@ output_dir: "results"
 bio_schemes: ["cell_type", "cell_cluster"]
 
 # ATAC per-cell QC (ArchR project creation)
-min_tss: 5                           # TSSEnrichment threshold
-min_log10_nfrags: 3.5                # nFrags >= 10^3.5
-max_blacklist_ratio: 0.05            # fraction of reads in blacklist
 copy_arrows: true
 
 # GEX per-cell QC

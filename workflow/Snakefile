@@ -16,8 +16,8 @@ BIO_SCHEMES      = config.get("bio_schemes", ["cell_type","cell_cluster"])
 # ------------------------------------------------------------------
 rule all:
     input:
-        f"{RESULTS}/joint/cell_filters.tsv"
-        # f"{RESULTS}/gex/merged/gex_merged.rds",
+        # f"{RESULTS}/joint/cell_filters.tsv"
+        f"{RESULTS}/gex/merged/gex_tagged.rds",
         # f"{RESULTS}/atac/single_qc/ArchRProject/BMS_clean"
         # expand(f"{RESULTS}/atac/pcs/{{scheme}}/pc_df_atac.csv", scheme=BIO_SCHEMES)
 
@@ -34,9 +34,6 @@ rule atac_per_cell_qc:
         fig  = f"{RESULTS}/atac/single_qc/ATAC_per_cell_QC.pdf"
     params:
         genome  = config.get("genome", "mm10"),
-        min_tss = config.get("min_tss", 5),
-        min_log10_nfrags = config.get("min_log10_nfrags", 3.5),
-        max_black = config.get("max_blacklist_ratio", 0.05),
         copy_arrows = "TRUE" if config.get("copy_arrows", False) else "FALSE",
         arrow_dir = ARROW_DIR
     singularity: config.get("r_singularity","")
@@ -48,9 +45,6 @@ rule atac_per_cell_qc:
           --out_proj {output.proj} \
           --out_qc {output.qc} \
           --out_fig {output.fig} \
-          --min_tss {params.min_tss} \
-          --min_log10_nfrags {params.min_log10_nfrags} \
-          --max_blacklist {params.max_black} \
           --copy_arrows {params.copy_arrows}
         """
 
@@ -61,9 +55,8 @@ rule gex_per_cell_qc:
     input:
         samples = SAMPLE_TABLE,
     output:
-        rds = f"{RESULTS}/gex/merged/gex_merged.rds",
-        qc  = f"{RESULTS}/gex/single_qc/gex_qc.tsv",
-        fig = f"{RESULTS}/gex/single_qc/GEX_per_cell_QC.pdf"
+        rds = f"{RESULTS}/gex/merged/gex_tagged.rds",
+        qc  = f"{RESULTS}/gex/single_qc/gex_qc.tsv"
     params:
         allen = config["allen_reference_rds"],
         aligned_dir = config["aligned_dir"]
@@ -75,8 +68,7 @@ rule gex_per_cell_qc:
           --aligned_dir {params.aligned_dir} \
           --allen_ref {params.allen} \
           --out_rds {output.rds} \
-          --out_qc {output.qc} \
-          --out_fig {output.fig}
+          --out_qc {output.qc}
         """
 
 # ------------------------------------------------------------------

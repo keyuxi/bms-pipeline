@@ -1,0 +1,28 @@
+Assuming unrestricted shared filesystem usage.
+None
+host: DN52eml1.SUNet
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 14
+Rules claiming more threads will be scaled down.
+Conda environments: ignored
+Job stats:
+job                count
+---------------  -------
+all                    1
+gex_per_cell_qc        1
+total                  2
+
+Select jobs to execute...
+Execute 1 jobs...
+RuleException in rule gex_per_cell_qc in file "/Users/kyx/workspace/bms-pipeline/workflow/Snakefile", line 54:
+AttributeError: 'OutputFiles' object has no attribute 'fig', when formatting the following:
+
+        Rscript workflow/scripts/gex/gex_per_cell.R \
+          --samples_csv {input.samples} \
+          --aligned_dir {params.aligned_dir} \
+          --allen_ref {params.allen} \
+          --out_rds {output.rds} \
+          --out_qc {output.qc} \
+          --out_fig {output.fig}
+        

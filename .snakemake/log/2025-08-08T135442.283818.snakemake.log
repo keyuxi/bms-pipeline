@@ -1,0 +1,76 @@
+Assuming unrestricted shared filesystem usage.
+None
+host: DN52eml1.SUNet
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 14
+Rules claiming more threads will be scaled down.
+Conda environments: ignored
+Job stats:
+job                      count
+---------------------  -------
+all                          1
+joint_per_cell_filter        1
+total                        2
+
+Select jobs to execute...
+Execute 1 jobs...
+[Fri Aug  8 13:54:43 2025]
+localrule joint_per_cell_filter:
+    input: results/atac/single_qc/atac_qc.tsv, results/gex/single_qc/gex_qc.tsv
+    output: results/joint/cell_filters.tsv
+    jobid: 1
+    reason: Missing output files: results/joint/cell_filters.tsv
+    resources: tmpdir=/var/folders/zh/6fmmt96j7f30q2xr1cdwmjgh0000gr/T
+RuleException:
+CalledProcessError in file "/Users/kyx/workspace/bms-pipeline/workflow/Snakefile", line 98:
+Command 'set -euo pipefail;  
+        Rscript workflow/scripts/joint/joint_per_cell_filtering.R \
+          --atac_qc results/atac/single_qc/atac_qc.tsv \
+          --gex_qc results/gex/single_qc/gex_qc.tsv \
+          --out_tsv results/joint/cell_filters.tsv \
+          --gex_fix_second_underscore TRUE \
+          --drop_gex_doublets TRUE \
+          --gex_doublet_col scDblFinder_class \
+          --gex_doublet_label doublet' returned non-zero exit status 1.
+[Fri Aug  8 13:54:44 2025]
+Error in rule joint_per_cell_filter:
+    message: None
+    jobid: 1
+    input: results/atac/single_qc/atac_qc.tsv, results/gex/single_qc/gex_qc.tsv
+    output: results/joint/cell_filters.tsv
+    shell:
+        
+        Rscript workflow/scripts/joint/joint_per_cell_filtering.R \
+          --atac_qc results/atac/single_qc/atac_qc.tsv \
+          --gex_qc results/gex/single_qc/gex_qc.tsv \
+          --out_tsv results/joint/cell_filters.tsv \
+          --gex_fix_second_underscore TRUE \
+          --drop_gex_doublets TRUE \
+          --gex_doublet_col scDblFinder_class \
+          --gex_doublet_label doublet
+        
+        (command exited with non-zero exit code)
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look below for error messages
+[Fri Aug  8 13:54:44 2025]
+Error in rule joint_per_cell_filter:
+    message: None
+    jobid: 1
+    input: results/atac/single_qc/atac_qc.tsv, results/gex/single_qc/gex_qc.tsv
+    output: results/joint/cell_filters.tsv
+    shell:
+        
+        Rscript workflow/scripts/joint/joint_per_cell_filtering.R \
+          --atac_qc results/atac/single_qc/atac_qc.tsv \
+          --gex_qc results/gex/single_qc/gex_qc.tsv \
+          --out_tsv results/joint/cell_filters.tsv \
+          --gex_fix_second_underscore TRUE \
+          --drop_gex_doublets TRUE \
+          --gex_doublet_col scDblFinder_class \
+          --gex_doublet_label doublet
+        
+        (command exited with non-zero exit code)
+Complete log(s): /Users/kyx/workspace/bms-pipeline/.snakemake/log/2025-08-08T135442.283818.snakemake.log
+WorkflowError:
+At least one job did not complete successfully.
