@@ -1,0 +1,190 @@
+---
+title: "BMS"
+author: "Yuxi Ke"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    theme: "flatly"
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: show
+---
+
+# Overview
+
+Make biological pseudobulks for atac distal peaks.
+VST normalize and extract DESeq2 PCs.
+
+Input:
+
+    - `BMS_diff_m`: An ArchR project
+    
+    - `config/samples.csv`
+    
+    - `/oak/stanford/groups/wjg/kyx/data/bms/pb/var_pb.rds`
+    
+# Setup
+
+```{r config, warning = FALSE, include=FALSE}
+here::i_am(".gitignore")
+
+# Output and figures are saved to the same sub-folder
+doc_id     <- file.path("peak_selection/")
+out    <- file.path(here::here("data/atac/"), doc_id)
+if (!dir.exists(out)) dir.create(out, recursive = TRUE)
+
+knitr::opts_chunk$set(message = TRUE, warning = FALSE, error = FALSE, 
+                      fig.path = out, fig.keep = "all", dev = c("png", "pdf"),
+                      cache = FALSE, cache.lazy = FALSE)
+grDevices::pdf.options(useDingbats = FALSE)
+options(knitr.table.format = "html") 
+
+library(ggplot2)
+library(DESeq2)
+
+reload <- function() devtools::load_all("~/gh/bms")
+redoc <- function() devtools::document("~/gh/bms")
+reload(); bms::setup_archr(); bms::set_theme();set.seed(100)
+```
+
+***
+
+# Load data
+
+```{r Define file names and read data, include=FALSE}
+location <- "sherlock" # {"local", "sherlock"}
+
+if (location == "local") {
+    archr.proj.path <- here::here("Data/ArchRProjects/BMS_diff_m")
+} else {
+    oak.path <- "/oak/stanford/groups/wjg/kyx/data/bms"
+    archr.proj.path <- file.path(oak.path, "archr/BMS_diff_m")
+    var_pb_dir <- file.path(oak.path, "pb/var_pb.rds")
+}
+
+proj <- loadArchRProject(archr.proj.path, showLogo = FALSE)
+sample_metadata <- load_sample_metadata(here::here("config/samples.csv"))
+var_pb <- readRDS(var_pb_dir)
+```
+
+# ATAC distal-only vsd
+
+```{r Get distal ATAC peaks by cell type}
+atac_pb <- var_pb[rowData(var_pb)$peakType == "Distal", colData(var_pb)$NumCells > 15]
+print(dim(atac_pb))
+```
+
+```{r Generic model for ATAC PCs}
+metadata_atac <- bms::get_formatted_pb_metadata(atac_pb)
+dds_atac <- DESeq2::DESeqDataSetFromMatrix(countData = counts(atac_pb),
+                                      colData = metadata_atac,
+                                      design = ~ 1)
+# !! Use "poscounts" as there are many zeros and other methods won't work
+dds_atac <- estimateSizeFactors(dds_atac, type = "poscounts")
+vsd_atac <- DESeq2::varianceStabilizingTransformation(dds_atac, blind = TRUE)
+```
+
+```{r Extract all ATAC PCs to df}
+mat <- assay(vsd_atac)                         # genes × samples
+pca <- stats::prcomp(t(mat), center = TRUE)      # samples × PCs
+
+# Percent variance explained by each PC
+percentVar <- pca$sdev^2 / sum(pca$sdev^2)
+
+# Build a data.frame of PC scores + metadata
+scores_df <- as.data.frame(pca$x)        # columns: PC1, PC2, …
+colnames(scores_df) <- sprintf("PC%02d", seq(length(colnames(scores_df))))
+scores_df$sample <- rownames(scores_df)
+
+meta_df <- as.data.frame(colData(vsd_atac))
+meta_df$sample <- rownames(meta_df)
+
+pc_df_atac <- merge(scores_df, meta_df, by = "sample")
+```
+
+```{r}
+obj_names <- c("atac_pb", "vsd_atac", "pc_df_atac")
+
+distal_dir <- file.path(dataout, "distal"); dir.create(distal_dir)
+bms::save_rds_objects(obj_names, distal_dir)
+```
+
+
+
+# Preprocessing
+
+Aggregate sample x cell type, and only keep pseudobulks with more than 15 cells.
+
+Run VST to get pseudobulk-level PCs.
+
+## ATAC
+
+```{r Load ATAC peaks}
+atac_pb  <- var_pb[, colData(var_pb)$NumCells > 15]
+print(dim(atac_pb))
+```
+
+
+```{r Generic model for ATAC PCs}
+metadata_atac <- get_formatted_pb_metadata(atac_pb)
+dds_atac <- DESeq2::DESeqDataSetFromMatrix(countData = counts(atac_pb),
+                                      colData = metadata_atac,
+                                      design = ~ 1)
+# !! Use "poscounts" as there are many zeros and other methods won't work
+dds_atac <- estimateSizeFactors(dds_atac, type = "poscounts")
+vsd_atac <- DESeq2::varianceStabilizingTransformation(dds_atac, blind = TRUE)
+```
+
+```{r Extract all ATAC PCs to df}
+mat <- assay(vsd_atac)                         # genes × samples
+pca <- stats::prcomp(t(mat), center = TRUE)      # samples × PCs
+
+# Percent variance explained by each PC
+percentVar <- pca$sdev^2 / sum(pca$sdev^2)
+
+# Build a data.frame of PC scores + metadata
+scores_df <- as.data.frame(pca$x)        # columns: PC1, PC2, …
+colnames(scores_df) <- sprintf("PC%02d", seq(length(colnames(scores_df))))
+scores_df$sample <- rownames(scores_df)
+
+pc_df_atac <- merge(scores_df, meta_df, by = "sample")
+```
+
+
+## ATAC gene scores
+```{r Gene score PB}
+geneScoreMat <- getMatrixFromProject(
+  ArchRProj = proj,
+  useMatrix = "GeneScoreMatrix"
+)
+```
+```{r}
+gene_score_pb <- bms::get_bio_pseudobulk(
+    mat = Seurat::GetAssayData(gex, layer = "counts"),
+    cell_metadata = gex@meta.data,
+    type_col = "cell_type",
+    sample_col = "orig.ident",
+    sample_metadata = sample_metadata
+)
+
+rna_pb  <- rna_pb[, colData(rna_pb)$NumCells > 15]
+print(dim(rna_pb))
+```
+
+
+# Save preprocessed data
+
+```{r Save to dataout}
+obj_names <- c("rna_pb", "vsd_rna", "pc_df_rna",
+               "atac_pb", "vsd_atac", "pc_df_atac")
+
+bms::save_rds_objects(obj_names, dataout)
+```
+
+# Session info
+
+```{r sinfo, cache = FALSE, class.source="fold-hide"}
+sessionInfo()
+```

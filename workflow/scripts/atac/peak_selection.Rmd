@@ -43,6 +43,8 @@ Input:
 
     - `BMS_diff_m`: An ArchR project
     
+    - `config/samples.csv`
+    
 Output:
 
     - `/oak/stanford/groups/wjg/kyx/data/bms/pb/var_pb.rds`
