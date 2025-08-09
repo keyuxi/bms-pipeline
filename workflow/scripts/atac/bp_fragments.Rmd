@@ -14,76 +14,64 @@ output:
 
 # Overview
 
-Export ArchR fragments
+Export ArchR fragments to BPCells format
+for track plotting.
 
 Input:
 
-    - An ArchR project after cell type annotation
-    - A sample metadata csv file
+    - `BMS_diff_m`: An ArchR project
     
-Yuxi Ke, 07/31/2025
+Output:
+
+    - `atac_merged.bpfrags`: All atac fragments from the Arrow files.
+    
+    - `bms_diff.bpfrags`: Cells matched to the ArchR project.
+    
+    - `cell_metadata`
+    
+    - `transcripts`: gene annotations for plots
 
 # Setup
 
 ```{r setup, include = FALSE, warning = FALSE, message=FALSE, echo=FALSE}
-project_id <- "bms" # determines the name of the cache folder
-doc_id     <- file.path("03-3c_export_fragments/") # determines name of the subfolder of `figures` where pngs/pdfs are saved
-dataout    <- file.path(here::here("Output/"), doc_id); dir.create(dataout, recursive = TRUE)
-figout     <- file.path(here::here("Fig/"), doc_id); dir.create(figout, recursive = TRUE)
-
-bp_outdir <- here::here("Data", "BPCells")
-if (!dir.exists(bp_outdir)) {
-  dir.create(bp_outdir, recursive = TRUE)
-}
-
 here::i_am(".gitignore")
-knitr::opts_chunk$set(message = TRUE,
-                      warning = FALSE,
-                      error = FALSE,
-                      cache = FALSE,
-                      fig.path = figout,
-                      fig.keep = "all",
-                      dev = c("png", "pdf"),
-                      cache.lazy = FALSE)
 
+# Output and figures are saved to the same sub-folder
+doc_id     <- file.path("bp_fragments/")
+out    <- file.path(here::here("data/atac/"), doc_id)
+bp_dir <- file.path("/oak/stanford/groups/wjg/kyx/data/bms/bpcells")
+if (!dir.exists(out)) dir.create(out, recursive = TRUE)
+if (!dir.exists(bp_dir)) dir.create(bp_dir, recursive = TRUE)
+
+knitr::opts_chunk$set(message = TRUE, warning = FALSE, error = FALSE, 
+                      fig.path = out, fig.keep = "all", dev = c("png", "pdf"),
+                      cache = FALSE, cache.lazy = FALSE)
 grDevices::pdf.options(useDingbats = FALSE)
 options(knitr.table.format = "html") 
 ```
 
 ```{r Libraries, class.source="fold-hide", warning = FALSE, message = FALSE}
-library(here)
-library(dplyr)
-library(tidyr)
-
-library(ArchR)
-library(BPCells)
+library(dplyr); library(tidyr)
+library(ArchR); library(BPCells)
 library(GenomicRanges)
 
-reload <- function() {
-    devtools::load_all("~/workspace/bms")
-}
-
-redoc <- function() {
-    devtools::document("~/workspace/bms")
-}
-
-reload()
-bms::setup_archr(); bms::set_theme()
-set.seed(100)
+reload <- function() devtools::load_all("~/gh/bms")
+redoc <- function() devtools::document("~/gh/bms")
+reload(); bms::setup_archr(); bms::set_theme();set.seed(100)
 ```
 ***
 
 # Load data
 
 ```{r Define file names and read data, include=FALSE}
-location <- "local" # {"local", "sherlock"}
+location <- "sherlock" # {"local", "sherlock"}
 
 if (location == "local") {
-    archr.proj.path <- here::here("Data/ArchRProjects/BMS_diff")
+    archr.proj.path <- here::here("Data/ArchRProjects/BMS_diff_m")
     bp_dir <- here::here("Data/BPCells")
 } else {
     oak.path <- "/oak/stanford/groups/wjg/kyx/data/bms"
-    archr.proj.path <- file.path(oak.path, "archr/BMS_diff")
+    archr.proj.path <- file.path(oak.path, "archr/BMS_diff_m")
 }
 
 proj <- loadArchRProject(archr.proj.path, showLogo = FALSE)
@@ -91,11 +79,9 @@ proj <- loadArchRProject(archr.proj.path, showLogo = FALSE)
 
 # Get fragments
 
-```{r}
+```{r Get fragments}
 frags <- getFragmentsFromProject(proj)
-```
-# Save fragments
-```{r Save individual fragments files}
+
 # Define autosomes for mm10
 autosomes <- paste0("chr", 1:19)
 
@@ -106,35 +92,27 @@ all_frags_list <- lapply(frags, function(gr) {
   gr <- BPCells::convert_to_fragments(gr)
   return(gr)
 })
-
-# Write each fragments object to a separate .bpfrags file
-# for (sample_name in names(all_frags_list)) {
-#   message("Saving: ", sample_name)
-#   
-#   frag <- all_frags_list[[sample_name]]
-# 
-#   write_fragments_dir(frag, file.path(bp_outdir, paste0(sample_name, ".bpfrags")))
-# }
 ```
 
-# Add metadata
-```{r Merge and subset}
+# Save fragments and add metadata
+
+```{r Save to bpfrags}
 # Merge samples
 frags_all <- Reduce(c, all_frags_list)
-write_fragments_dir(frags_all, file.path(bp_dir, "ATAC_merged.bpfrags"), overwrite = TRUE)
+write_fragments_dir(frags_all, file.path(bp_dir, "atac_merged.bpfrags"), overwrite = TRUE)
 
 # Subset to match ArchR
 cell_metadata <- getCellColData(proj) %>%
     as.data.frame() %>%
     dplyr::select(c("nFrags", "TSSEnrichment",  
-                    "cell_type", "cell_class",
+                    "cell_cluster", "cell_type", "cell_class",
                     "Sample", "Condition", "Group", "Gating", "Recall", "Time")) %>%
     tibble::rownames_to_column("cell_names")
 
 frags <- select_cells(frags_all, cell_metadata$cell_names)
 stopifnot(all(cell_metadata$cell_names == cellNames(frags)))
 
-write_fragments_dir(frags, file.path(bp_dir, "BMS_diff.bpfrags"), overwrite = TRUE)
+write_fragments_dir(frags, file.path(bp_dir, "bms_diff.bpfrags"), overwrite = TRUE)
 ```
 
 
